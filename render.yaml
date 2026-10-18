@@ -1,0 +1,20 @@
+# Blueprint de Render: crea el servicio web desde el repo de GitHub.
+services:
+  - type: web
+    name: castillo-egresos
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/salud
+    envVars:
+      - key: DATABASE_URL        # pegar la cadena de Neon (sin pooler) en el panel de Render
+        sync: false
+      - key: JWT_SECRET          # Render genera un valor aleatorio
+        generateValue: true
+      - key: GERENTE_CLAVE       # clave inicial del gerente (solo se usa al crear los datos la primera vez)
+        sync: false
+      - key: ASISTENTE_CLAVE     # clave inicial del asistente
+        sync: false
+      - key: NODE_VERSION
+        value: 22

@@ -1,0 +1,14 @@
+{
+  "name": "castillo-egresos",
+  "version": "2.0.0",
+  "description": "MVP Sistema de Egresos - empresa Castillo (Node + PostgreSQL)",
+  "main": "src/server.js",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/flujo.test.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}
