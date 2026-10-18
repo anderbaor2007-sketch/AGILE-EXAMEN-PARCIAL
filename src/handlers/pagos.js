@@ -130,7 +130,7 @@ async function validarNuevo(body) {
   const f = body.fecha_vencimiento;
   if (!f) campos.fecha_vencimiento = 'Ingresa la fecha de vencimiento';
   else if (!esFecha(f)) campos.fecha_vencimiento = 'La fecha de vencimiento no es válida';
-  else if (f <= hoy()) campos.fecha_vencimiento = 'La fecha de vencimiento debe ser una fecha futura';
+  else if (f < hoy()) campos.fecha_vencimiento = 'La fecha de vencimiento no puede ser anterior a hoy';   // hoy sí se permite: vence al terminar el día (00:00 del día siguiente)
   else if (f > sumaAnio(hoy())) campos.fecha_vencimiento = 'El vencimiento no puede ser mayor a 1 año desde hoy';
 
   if (Object.keys(campos).length) return { e: err(400, 'Corrige los campos indicados', campos) };

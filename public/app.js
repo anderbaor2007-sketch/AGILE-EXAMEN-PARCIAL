@@ -252,7 +252,7 @@ let nuevoDatos = null;
 $('btn-nuevo').onclick = () => {
   ['n-concepto', 'n-entidad', 'n-monto', 'n-venc'].forEach((i) => ($(i).value = ''));
   $('sel-cat').value = ''; limpiarErrores($('dlg-nuevo')); { const m = new Date(); m.setFullYear(m.getFullYear() + 1); $('n-venc').max = fechaLima(m); } $('nuevo-error').textContent = ''; $('nuevo-error2').textContent = '';
-  $('nuevo-paso1').hidden = false; $('nuevo-paso2').hidden = true; $('n-venc').min = sumaDias(fechaLima(), 1); $('dlg-nuevo').showModal();
+  $('nuevo-paso1').hidden = false; $('nuevo-paso2').hidden = true; $('n-venc').min = fechaLima(); $('dlg-nuevo').showModal();
 };
 $('n-entidad').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^\p{L} ]/gu, '').replace(/ {2,}/g, ' '); });   // solo letras
 $('nuevo-continuar').onclick = async () => {

@@ -68,7 +68,11 @@ test('HU-05 registrar pago por realizar (validaciones, límites, repetido)', asy
   assert.equal((await crear({ concepto: 'Servicio tope', categoria_id: 1, monto: '20000', fecha_vencimiento: mas(11) })).status, 201);
   assert.ok((await crear({ categoria_id: 2, monto: '500000.01' })).json.campos.monto);                  // otras: S/ 500 000
   assert.equal((await crear({ concepto: 'Proveedor tope', categoria_id: 2, monto: '500000', fecha_vencimiento: mas(12) })).status, 201);
-  assert.ok((await crear({ fecha_vencimiento: hoy() })).json.campos.fecha_vencimiento);                  // debe ser futura
+  assert.match((await crear({ fecha_vencimiento: mas(-1) })).json.campos.fecha_vencimiento, /anterior a hoy/);      // no puede ser pasada
+  const venceHoy = await crear({ concepto: 'Vence hoy registrado', entidad: 'Entidad Hoy', fecha_vencimiento: hoy() });
+  assert.equal(venceHoy.status, 201);                                                                    // hoy sí: vence al terminar el día
+  const vh = (await pedir(asistente, 'GET', '/api/pagos')).json.pagos.find((x) => x.concepto === 'Vence hoy registrado');
+  assert.equal(vh.dias, 0); assert.notEqual(vh.alerta, 'ATRASADO');                                      // hoy no está atrasado; lo estará desde las 00:00 de mañana
   assert.ok((await crear({ fecha_vencimiento: mas(-3) })).json.campos.fecha_vencimiento);
   assert.ok((await crear({ fecha_vencimiento: '2026-02-31' })).json.campos.fecha_vencimiento);
   // Entidad: solo letras
