@@ -73,6 +73,7 @@ ALTER TABLE evidencias ADD COLUMN IF NOT EXISTS numero_intento INT;
 ALTER TABLE evidencias ADD COLUMN IF NOT EXISTS reemplazada_en TIMESTAMPTZ;
 CREATE UNIQUE INDEX IF NOT EXISTS ux_evidencia_vigente ON evidencias(pago_id) WHERE vigente;
 
+ALTER TABLE evidencias ADD COLUMN IF NOT EXISTS comentario TEXT;   -- comentario del asistente al subir/cambiar la evidencia
 ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS sesion_id TEXT;   -- sesión vigente: un solo inicio de sesión activo por usuario
 
 -- Los usuarios son «Gerente» y «Asistente» (con mayúscula inicial)

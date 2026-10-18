@@ -106,31 +106,6 @@ $('btn-salir').onclick = cerrarSesion; $('g-salir').onclick = cerrarSesion;
 // =====================================================================
 // GERENTE — HU-02 panel de monitoreo
 // =====================================================================
-const COL = { azul: '#3b8cf5', verde: '#12a150', ambar: '#f0a020', rojo: '#d92d4a', morado: '#7b3cf0', cian: '#18b6df' };
-
-function lineaSvg(valores, etiquetas) {
-  const W = 560, H = 190, px = 34, py = 18; const max = Math.max(...valores, 1);
-  const x = (i) => px + (i * (W - px * 2)) / Math.max(valores.length - 1, 1); const y = (v) => H - py - (v / max) * (H - py * 2);
-  const pts = valores.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const area = `${px},${H - py} ${pts} ${x(valores.length - 1)},${H - py}`;
-  const guias = [0, .5, 1].map((f) => `<line x1="${px}" x2="${W - px}" y1="${y(max * f)}" y2="${y(max * f)}" stroke="#e8edf6"/><text x="2" y="${y(max * f) + 4}" font-size="10" fill="#8b95ad">${Math.round(max * f)}</text>`).join('');
-  const marcas = etiquetas.map((t, i) => (i % 5 === 0 || i === etiquetas.length - 1 ? `<text x="${x(i)}" y="${H - 2}" font-size="10" text-anchor="middle" fill="#8b95ad">${t}</text>` : '')).join('');
-  const puntos = valores.map((v, i) => (v ? `<circle cx="${x(i)}" cy="${y(v)}" r="4" fill="#fff" stroke="${COL.azul}" stroke-width="2"><title>Día ${etiquetas[i]}: ${soles(v)}</title></circle>` : '')).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" class="svg-grafico" role="img" aria-label="Lo pagado por día">
-    <defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${COL.azul}" stop-opacity=".35"/><stop offset="1" stop-color="${COL.azul}" stop-opacity="0"/></linearGradient></defs>
-    ${guias}<polygon points="${area}" fill="url(#lg)"/><polyline points="${pts}" fill="none" stroke="${COL.azul}" stroke-width="3" stroke-linejoin="round"/>${puntos}${marcas}</svg>`;
-}
-function donaSvg(partes) {
-  const total = partes.reduce((s, p) => s + p.v, 0); const R = 52, C = 2 * Math.PI * R; let acc = 0;
-  const arcos = total ? partes.map((p) => { const l = (p.v / total) * C; const a = `<circle r="${R}" cx="70" cy="70" fill="none" stroke="${p.c}" stroke-width="22" stroke-dasharray="${l} ${C - l}" stroke-dashoffset="${-acc}" transform="rotate(-90 70 70)"><title>${p.n}: ${soles(p.v)}</title></circle>`; acc += l; return a; }).join('')
-    : `<circle r="${R}" cx="70" cy="70" fill="none" stroke="#e8edf6" stroke-width="22"/>`;
-  const leyenda = partes.map((p) => `<li><i style="background:${p.c}"></i>${p.n}<b>${soles(p.v)}</b></li>`).join('');
-  return `<div class="dona"><svg viewBox="0 0 140 140" width="140" height="140" role="img" aria-label="Distribución por monto">${arcos}<text x="70" y="75" text-anchor="middle" font-size="13" font-weight="800" fill="#1c2540">${soles(total).replace('S/ ', '')}</text></svg><ul>${leyenda}</ul></div>`;
-}
-function anilloSvg(pct, color, titulo) {
-  const R = 38, C = 2 * Math.PI * R, l = (Math.min(pct, 100) / 100) * C;
-  return `<div class="anillo"><svg viewBox="0 0 100 100" width="104" height="104"><circle r="${R}" cx="50" cy="50" fill="none" stroke="#e8edf6" stroke-width="10"/><circle r="${R}" cx="50" cy="50" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="round" stroke-dasharray="${l} ${C}" transform="rotate(-90 50 50)"/><text x="50" y="56" text-anchor="middle" font-size="18" font-weight="800" fill="#1c2540">${pct}%</text></svg><small>${titulo}</small></div>`;
-}
 function tarjetaKpi(clase, icono, titulo, n, monto) {
   return `<div class="g-kpi ${clase}"><div class="g-kpi-ic">${icono}</div><div><small>${titulo}</small><b>${soles(monto)}</b><span>${n} ${n === 1 ? 'pago' : 'pagos'}</span></div></div>`;
 }
@@ -148,28 +123,13 @@ async function cargarPanel() {
   $('g-resumen').innerHTML = tarjetaKpi('solido', '✔', 'Pagados', r.pagados.n, r.pagados.monto) + tarjetaKpi('', '⏳', 'Pendientes', r.pendientes.n, r.pendientes.monto)
     + tarjetaKpi('', '⚠', 'Atrasados', r.atrasados.n, r.atrasados.monto) + tarjetaKpi('', '◷', 'Pagos de hoy', d.hoy_lista.length, d.hoy_lista.reduce((s, p) => s + p.monto, 0));
   $('g-vacio').hidden = d.hay_pagos;                        // «no hay pagos registrados para este mes»
-  document.querySelectorAll('.g-fila').forEach((x) => (x.hidden = !d.hay_pagos));
-
-  // Gráficos
-  const diasMes = Number(d.hoy.slice(8)); const porDia = Array(diasMes).fill(0);
-  d.pagados.forEach((p) => { if (p.fecha_pago.slice(0, 7) === d.mes) porDia[Number(p.fecha_pago.slice(8)) - 1] += p.monto; });
-  $('g-linea').innerHTML = lineaSvg(porDia, porDia.map((_, i) => String(i + 1)));
-  $('g-dona').innerHTML = donaSvg([{ n: 'Pagado', v: r.pagados.monto, c: COL.verde }, { n: 'Pendiente', v: r.pendientes.monto, c: COL.azul }, { n: 'Atrasado', v: r.atrasados.monto, c: COL.rojo }]);
-  const cats = {}; [...d.pagados, ...d.pendientes].forEach((p) => (cats[p.categoria] = (cats[p.categoria] || 0) + p.monto));
-  const maxC = Math.max(...Object.values(cats), 1); const colores = [COL.azul, COL.cian, COL.morado, COL.ambar];
-  $('g-barras').innerHTML = Object.entries(cats).map(([k, v], i) => `<div class="hbar"><span>${esc(k)}</span><div><i style="width:${(v / maxC) * 100}%;background:${colores[i % 4]}"></i></div><b>${soles(v)}</b></div>`).join('') || '<p class="vacio">Sin datos</p>';
-  const totalN = r.pagados.n + r.pendientes.n + r.atrasados.n;
-  $('g-anillos').innerHTML = anilloSvg(totalN ? Math.round((r.pagados.n / totalN) * 100) : 0, COL.verde, 'Pagados')
-    + anilloSvg(totalN ? Math.round((r.pendientes.n / totalN) * 100) : 0, COL.azul, 'Pendientes') + anilloSvg(totalN ? Math.round((r.atrasados.n / totalN) * 100) : 0, COL.rojo, 'Atrasados');
-  $('g-bloques').innerHTML = `<div class="bloque b1"><small>Pagos de hoy</small><b>${d.hoy_lista.length}</b></div><div class="bloque b2"><small>Atrasados</small><b>${r.atrasados.n}</b></div>
-    <div class="bloque b3"><small>Cambios de evidencia</small><b>${d.cambios.length}</b></div><div class="bloque b4"><small>Pagados este mes</small><b>${r.pagados.n}</b></div>`;
 
   // Tablas
   const tabla = (idf, idv, filas, html) => { $(idf).innerHTML = filas.map(html).join(''); $(idv).hidden = filas.length > 0; };
-  tabla('g-hoy-f', 'g-hoy-v', d.hoy_lista, (p) => `<tr><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td class="monto">${soles(p.monto)}</td><td>${p.estado === 'PAGADO' ? '<span class="etq PAGADO">Pagado</span>' : etqSituacion(p)}</td></tr>`);
-  tabla('g-pagado-f', 'g-pagado-v', d.pagados, (p) => `<tr><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td><span class="cat">${esc(p.categoria)}</span></td><td class="monto">${soles(p.monto)}</td><td>${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}</td><td><button class="btn btn-claro btn-sm" data-evid="${p.id}">Ver evidencia</button></td></tr>`);
-  tabla('g-pend-f', 'g-pend-v', d.pendientes, (p) => `<tr class="${p.alerta === 'ATRASADO' ? 'fila-atrasada' : ''}"><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td class="monto">${soles(p.monto)}</td><td>${fmtFecha(p.fecha_vencimiento)}</td><td>${etqSituacion(p)}</td></tr>`);
-  tabla('g-cambios-f', 'g-cambios-v', d.cambios, (c) => `<tr><td><b>${esc(c.concepto)}</b><br><small>${esc(c.entidad)}</small></td><td>Intento ${c.numero_intento}</td><td>${esc(c.fecha_hora)}</td><td><button class="btn btn-claro btn-sm" data-evid="${c.pago_id}">Ver evidencia</button></td></tr>`);
+  tabla('g-hoy-f', 'g-hoy-v', d.hoy_lista, (p) => `<tr><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td class="monto">${soles(p.monto)}</td><td>${p.estado === 'PAGADO' ? '<span class="etq PAGADO">Pagado</span>' : etqSituacion(p)}</td></tr>`);
+  tabla('g-pagado-f', 'g-pagado-v', d.pagados, (p) => `<tr><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td><span class="cat">${esc(p.categoria)}</span></td><td class="monto">${soles(p.monto)}</td><td>${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}</td><td><button class="btn btn-claro btn-sm" data-evid="${p.id}">Ver evidencia</button></td></tr>`);
+  tabla('g-pend-f', 'g-pend-v', d.pendientes, (p) => `<tr class="${p.alerta === 'ATRASADO' ? 'fila-atrasada' : ''}"><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td class="monto">${soles(p.monto)}</td><td>${fmtFecha(p.fecha_vencimiento)}</td><td>${etqSituacion(p)}</td></tr>`);
+  tabla('g-cambios-f', 'g-cambios-v', d.cambios, (c) => `<tr><td class="cod">${c.codigo}</td><td><b>${esc(c.concepto)}</b><br><small>${esc(c.entidad)}</small></td><td>Intento ${c.numero_intento}</td><td>${esc(c.fecha_hora)}</td><td><button class="btn btn-claro btn-sm" data-evid="${c.pago_id}">Ver evidencia</button></td></tr>`);
   document.querySelectorAll('[data-evid]').forEach((b) => (b.onclick = () => abrirEvidencia(b.dataset.evid)));
 }
 $('g-actualizar').onclick = async () => { const b = $('g-actualizar'); b.disabled = true; await cargarPanel(); b.disabled = false; };
@@ -181,14 +141,14 @@ async function abrirEvidencia(pagoId) {
   try { d = await api(`/api/pagos/${pagoId}/evidencias`); }
   catch (e) { if (e.sesion) return; return aviso('Evidencia', e.status === 409 ? e.message : 'No fue posible mostrar la evidencia.'); }
   const p = d.pago;
-  $('evid-datos').innerHTML = dl([['Concepto', esc(p.concepto)], ['Entidad', esc(p.entidad)], ['Monto', soles(p.monto)], ['Fecha y hora de pago', `${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}`], ['Comentario del asistente', p.comentario ? esc(p.comentario) : '—']]);
+  $('evid-datos').innerHTML = dl([['ID', p.codigo], ['Concepto', esc(p.concepto)], ['Entidad', esc(p.entidad)], ['Monto', soles(p.monto)], ['Fecha y hora de pago', `${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}`], ['Comentario del pago', p.comentario ? esc(p.comentario) : '—']]);
   const mostrar = (a, etiqueta) => {
     const url = `/api/evidencias/${a.id}`;
-    $('evid-cuerpo').innerHTML = `<p class="evid-etq">${etiqueta}: ${esc(a.nombre)}</p>` + (a.tipo === 'application/pdf' ? `<iframe src="${url}" title="Evidencia"></iframe>` : `<img src="${url}" alt="Evidencia del pago">`);
+    $('evid-cuerpo').innerHTML = `<p class="evid-etq">${etiqueta}: ${esc(a.nombre)}</p><p class="evid-com">Comentario: ${a.comentario ? esc(a.comentario) : '—'}</p>` + (a.tipo === 'application/pdf' ? `<iframe src="${url}" title="Evidencia"></iframe>` : `<img src="${url}" alt="Evidencia del pago">`);
     $('evid-descargar').href = url + '?descargar=1'; $('evid-descargar').hidden = false;
   };
   mostrar(d.vigente, 'Evidencia vigente');
-  $('evid-previos').innerHTML = d.previos.length ? `<h4>Intentos previos (solo lectura)</h4><ul class="previos">${d.previos.map((a) => `<li><span>Intento ${a.numero_intento} · ${esc(a.nombre)} · reemplazado el ${esc(a.reemplazada_en)}</span>
+  $('evid-previos').innerHTML = d.previos.length ? `<h4>Intentos previos (solo lectura)</h4><ul class="previos">${d.previos.map((a) => `<li><span>Intento ${a.numero_intento} · ${esc(a.nombre)} · reemplazado el ${esc(a.reemplazada_en)}<br><small>Comentario: ${a.comentario ? esc(a.comentario) : '—'}</small></span>
       <button class="btn btn-claro btn-sm" data-prev="${a.id}">Ver</button> <a class="btn btn-claro btn-sm" href="/api/evidencias/${a.id}?descargar=1">Descargar</a></li>`).join('')}</ul>` : '';
   $('evid-previos').querySelectorAll('[data-prev]').forEach((b) => (b.onclick = () => mostrar(d.previos.find((x) => String(x.id) === b.dataset.prev), 'Intento previo')));
   $('dlg-evid').showModal();
@@ -220,16 +180,15 @@ async function cargarMes() {
   catch (e) { if (e.sesion) return; $('filas').innerHTML = ''; $('m-vista-cal').innerHTML = ''; $('resumen').innerHTML = ''; return vacioMes('No fue posible obtener los pagos del mes.', true); }
   mes = d.mes; pagosMes = d.pagos;
   $('mes-titulo').textContent = nombreMes(mes);
-  const r = d.resumen; const pct = r.total_mes ? Math.round((r.pagado_mes / r.total_mes) * 100) : 0;
+  const r = d.resumen;
   $('resumen').innerHTML = `
     <div class="kpi azul"><div class="kpi-icono">💼</div><div><small>Total del mes</small><b>${soles(r.total_mes)}</b></div></div>
     <div class="kpi verde"><div class="kpi-icono">✅</div><div><small>Ya pagado</small><b>${soles(r.pagado_mes)}</b></div></div>
-    <div class="kpi ambar"><div class="kpi-icono">⏳</div><div><small>Falta pagar (${r.n_pendientes})</small><b>${soles(r.pendiente_total)}</b></div></div>
-    <div class="progreso">Avance de pagos del mes: ${pct}%<div class="barra-fondo"><div class="barra-valor" style="width:${pct}%"></div></div></div>`;
+    <div class="kpi ambar"><div class="kpi-icono">⏳</div><div><small>Falta pagar (${r.n_pendientes})</small><b>${soles(r.pendiente_total)}</b></div></div>`;
   if (!d.pagos.length) vacioMes('No hay pagos registrados para este mes.', false); else $('vacio-mes').hidden = true;
   $('m-vista-lista').hidden = vistaMes !== 'lista' || !d.pagos.length; $('m-vista-cal').hidden = vistaMes !== 'cal' || !d.pagos.length;
   $('filas').innerHTML = d.pagos.map((p) => `<tr class="${p.alerta === 'ATRASADO' ? 'fila-atrasada' : ''}">
-    <td><b>${esc(p.concepto)}</b><br><small>${esc(p.entidad)}</small></td><td><span class="cat">${esc(p.categoria)}</span></td><td class="monto">${soles(p.monto)}</td>
+    <td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b><br><small>${esc(p.entidad)}</small></td><td><span class="cat">${esc(p.categoria)}</span></td><td class="monto">${soles(p.monto)}</td>
     <td>${fmtFecha(p.fecha_vencimiento)}</td><td>${etiquetaEstado(p)}</td><td>${p.estado === 'PAGADO' ? `${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}` : '—'}</td><td class="acciones">${botonesPago(p)}</td></tr>`).join('');
   pintarCalendario(d);
   enlazarAcciones(document.getElementById('vista-mes'));
@@ -248,7 +207,7 @@ function pintarCalendario(d) {
   $('m-vista-cal').innerHTML = (previos.length ? `<div class="cal-previos"><b>Atrasados de meses anteriores:</b> ${previos.map((p) => `<button class="cal-pago atr" data-detalle="${p.id}">${esc(p.concepto)} (${fmtFecha(p.fecha_vencimiento)})</button>`).join('')}</div>` : '') + `<div class="cal">${celdas}</div>`;
   $('m-vista-cal').querySelectorAll('[data-detalle]').forEach((b) => (b.onclick = () => {
     const p = pagosMes.find((x) => String(x.id) === b.dataset.detalle);
-    aviso(p.concepto, `Entidad: ${p.entidad}\nCategoría: ${p.categoria}\nMonto: ${soles(p.monto)}\nVencimiento: ${fmtFecha(p.fecha_vencimiento)}\nEstado: ${p.estado === 'PAGADO' ? `Pagado el ${fmtFecha(p.fecha_pago)} ${p.hora_pago || ''}` : p.alerta === 'ATRASADO' ? 'Pendiente (atrasado)' : 'Pendiente'}`,
+    aviso(`${p.codigo} · ${p.concepto}`, `Entidad: ${p.entidad}\nCategoría: ${p.categoria}\nMonto: ${soles(p.monto)}\nVencimiento: ${fmtFecha(p.fecha_vencimiento)}\nEstado: ${p.estado === 'PAGADO' ? `Pagado el ${fmtFecha(p.fecha_pago)} ${p.hora_pago || ''}` : p.alerta === 'ATRASADO' ? 'Pendiente (atrasado)' : 'Pendiente'}`,
       p.estado === 'PENDIENTE' ? { texto: 'Registrar pago', accion: () => abrirPagar(p) } : null);
   }));
 }
@@ -265,7 +224,7 @@ async function cargarVencer() {
   pagosVencer = d.pagos; diasVencer = d.dias_por_vencer; $('dias-vencer').textContent = diasVencer;
   $('n-vencer').textContent = d.pagos.length; $('n-vencer').hidden = !d.pagos.length;
   $('vacio-vencer').hidden = d.pagos.length > 0; $('vacio-vencer').className = 'vacio'; $('vacio-vencer').textContent = 'No hay pagos por vencer.';
-  $('filas-vencer').innerHTML = d.pagos.map((p) => `<tr class="${p.alerta === 'ATRASADO' ? 'fila-atrasada' : ''}"><td><b>${esc(p.concepto)}</b><br><small>${esc(p.entidad)}</small></td><td><span class="cat">${esc(p.categoria)}</span></td>
+  $('filas-vencer').innerHTML = d.pagos.map((p) => `<tr class="${p.alerta === 'ATRASADO' ? 'fila-atrasada' : ''}"><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b><br><small>${esc(p.entidad)}</small></td><td><span class="cat">${esc(p.categoria)}</span></td>
     <td class="monto">${soles(p.monto)}</td><td>${fmtFecha(p.fecha_vencimiento)}</td>
     <td>${p.alerta === 'ATRASADO' ? `<span class="etq ATRASADO">Atrasado · ${-p.dias} ${-p.dias === 1 ? 'día' : 'días'}</span>` : `<span class="etq POR_VENCER">${p.dias === 0 ? 'Vence hoy' : p.dias === 1 ? 'Falta 1 día' : `Faltan ${p.dias} días`}</span>`}</td>
     <td class="acciones">${botonesPago(p)}</td></tr>`).join('');
@@ -292,9 +251,10 @@ async function refrescar() { await Promise.all([cargarMes(), cargarVencer()]); }
 let nuevoDatos = null;
 $('btn-nuevo').onclick = () => {
   ['n-concepto', 'n-entidad', 'n-monto', 'n-venc'].forEach((i) => ($(i).value = ''));
-  $('sel-cat').value = ''; limpiarErrores($('dlg-nuevo')); $('nuevo-error').textContent = ''; $('nuevo-error2').textContent = '';
+  $('sel-cat').value = ''; limpiarErrores($('dlg-nuevo')); { const m = new Date(); m.setFullYear(m.getFullYear() + 1); $('n-venc').max = fechaLima(m); } $('nuevo-error').textContent = ''; $('nuevo-error2').textContent = '';
   $('nuevo-paso1').hidden = false; $('nuevo-paso2').hidden = true; $('n-venc').min = sumaDias(fechaLima(), 1); $('dlg-nuevo').showModal();
 };
+$('n-entidad').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^\p{L} ]/gu, '').replace(/ {2,}/g, ' '); });   // solo letras
 $('nuevo-continuar').onclick = async () => {
   limpiarErrores($('dlg-nuevo')); $('nuevo-error').textContent = '';
   nuevoDatos = { concepto: $('n-concepto').value, entidad: $('n-entidad').value, categoria_id: $('sel-cat').value, monto: $('n-monto').value, fecha_vencimiento: $('n-venc').value };
@@ -323,7 +283,7 @@ $('nuevo-confirmar').onclick = async () => {
 
 // ---------- HU-06: registrar pago como realizado ----------
 let pagoActual = null;
-function datosPago(p) { return dl([['Concepto', esc(p.concepto)], ['Entidad', esc(p.entidad)], ['Categoría', esc(p.categoria)], ['Monto', soles(p.monto)], ['Vencimiento', fmtFecha(p.fecha_vencimiento)]]); }
+function datosPago(p) { return dl([['ID', p.codigo], ['Concepto', esc(p.concepto)], ['Entidad', esc(p.entidad)], ['Categoría', esc(p.categoria)], ['Monto', soles(p.monto)], ['Vencimiento', fmtFecha(p.fecha_vencimiento)]]); }
 function abrirPagar(p) {
   pagoActual = p; $('pagar-datos').innerHTML = datosPago(p);
   const hoyL = fechaLima(); const f = $('pagar-fecha'); f.value = hoyL; f.max = hoyL; f.min = sumaDias(hoyL, -7); $('pagar-hora').value = horaLima();
@@ -361,7 +321,7 @@ $('pagar-confirmar').onclick = async () => {
 function abrirCambiar(p) {
   pagoActual = p; const usados = p.intentos_usados || 0; const rest = 3 - usados;
   $('cambiar-datos').innerHTML = datosPago(p) + dl([['Archivo vigente', esc(p.evidencia_nombre || 'Sin archivo')], ['Intentos usados', `${usados} de 3`], ['Intentos disponibles', String(rest)]]);
-  $('cambiar-archivo').value = ''; limpiarErrores($('dlg-cambiar')); $('cambiar-error').textContent = '';
+  $('cambiar-archivo').value = ''; $('cambiar-coment').value = ''; limpiarErrores($('dlg-cambiar')); $('cambiar-error').textContent = '';
   $('cambiar-paso1').hidden = false; $('cambiar-paso2').hidden = true;
   if (rest <= 0) return aviso('Cambio de evidencia', 'Se alcanzó el máximo de 3 intentos de cambio de evidencia para este pago.');
   $('dlg-cambiar').showModal();
@@ -369,14 +329,14 @@ function abrirCambiar(p) {
 $('cambiar-continuar').onclick = () => {
   limpiarErrores($('dlg-cambiar')); const a = $('cambiar-archivo').files[0]; const ea = validarArchivo(a);
   if (ea) { $('err-cambiar-archivo').textContent = ea; return; }
-  $('cambiar-confirma').textContent = (pagoActual.evidencia_nombre ? `Se reemplazará «${pagoActual.evidencia_nombre}» por «${a.name}». El archivo actual quedará como intento previo y este cambio contará como un intento. ¿Confirmas?` : `Se adjuntará «${a.name}» como evidencia de este pago. ¿Confirmas?`);
+  $('cambiar-confirma').textContent = (pagoActual.evidencia_nombre ? `Se reemplazará «${pagoActual.evidencia_nombre}» por «${a.name}». El archivo actual quedará como intento previo y este cambio contará como un intento.${$('cambiar-coment').value.trim() ? ` Comentario: «${$('cambiar-coment').value.trim()}».` : ''} ¿Confirmas?` : `Se adjuntará «${a.name}» como evidencia de este pago. ¿Confirmas?`);
   $('cambiar-paso1').hidden = true; $('cambiar-paso2').hidden = false;
 };
 $('cambiar-volver').onclick = () => { $('cambiar-paso1').hidden = false; $('cambiar-paso2').hidden = true; };
 $('cambiar-confirmar').onclick = async () => {
   const b = $('cambiar-confirmar'); b.disabled = true; $('cambiar-error').textContent = '';
   try {
-    const r = await enviarArchivo(`/api/pagos/${pagoActual.id}/evidencia`, $('cambiar-archivo').files[0]);
+    const r = await enviarArchivo(`/api/pagos/${pagoActual.id}/evidencia`, $('cambiar-archivo').files[0], { 'X-Comentario': encodeURIComponent($('cambiar-coment').value.trim()) });
     $('dlg-cambiar').close(); aviso('Evidencia cambiada', `La evidencia se cambió correctamente. Te ${r.intentos_restantes === 1 ? 'queda 1 intento' : `quedan ${r.intentos_restantes} intentos`} de cambio.`); await refrescar();
   } catch (e) { if (!e.sesion) $('cambiar-error').textContent = e.red || !e.status || e.status >= 500 ? 'La operación no se completó. Se mantiene la evidencia actual.' : e.message; }
   finally { b.disabled = false; }

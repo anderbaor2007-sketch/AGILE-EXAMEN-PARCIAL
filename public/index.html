@@ -65,25 +65,16 @@
       <p id="g-error" class="vacio error" hidden></p>
       <div id="g-contenido">
         <section id="g-resumen" class="g-kpis"></section>
-        <section class="g-fila">
-          <div class="tarjeta g-linea"><h3>Lo pagado por día</h3><div id="g-linea"></div></div>
-          <div class="tarjeta g-dona"><h3>Distribución por monto</h3><div id="g-dona"></div></div>
-          <div class="g-bloques" id="g-bloques"></div>
-        </section>
-        <section class="g-fila g-fila2">
-          <div class="tarjeta"><h3>Monto por categoría</h3><div id="g-barras"></div></div>
-          <div class="tarjeta"><h3>Avance del mes</h3><div id="g-anillos" class="anillos"></div></div>
-        </section>
         <p id="g-vacio" class="vacio" hidden>No hay pagos registrados para este mes.</p>
 
         <section class="tarjeta tabla-tarjeta" id="g-hoy"><div class="tarj-t"><h3>Pagos de hoy</h3></div>
-          <table><thead><tr><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Estado</th></tr></thead><tbody id="g-hoy-f"></tbody></table><p id="g-hoy-v" class="vacio" hidden>No hay pagos con vencimiento hoy.</p></section>
+          <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Estado</th></tr></thead><tbody id="g-hoy-f"></tbody></table><p id="g-hoy-v" class="vacio" hidden>No hay pagos con vencimiento hoy.</p></section>
         <section class="tarjeta tabla-tarjeta" id="g-pagado"><div class="tarj-t"><h3>Lo pagado</h3><small>Del más reciente al más antiguo</small></div>
-          <table><thead><tr><th>Concepto</th><th>Entidad</th><th>Categoría</th><th class="der">Monto</th><th>Fecha y hora de pago</th><th></th></tr></thead><tbody id="g-pagado-f"></tbody></table><p id="g-pagado-v" class="vacio" hidden>Aún no hay pagos realizados este mes.</p></section>
+          <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th>Categoría</th><th class="der">Monto</th><th>Fecha y hora de pago</th><th></th></tr></thead><tbody id="g-pagado-f"></tbody></table><p id="g-pagado-v" class="vacio" hidden>Aún no hay pagos realizados este mes.</p></section>
         <section class="tarjeta tabla-tarjeta" id="g-pend"><div class="tarj-t"><h3>Pendientes del mes</h3><small>Los atrasados aparecen marcados</small></div>
-          <table><thead><tr><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Vencimiento</th><th>Situación</th></tr></thead><tbody id="g-pend-f"></tbody></table><p id="g-pend-v" class="vacio" hidden>No hay pagos pendientes.</p></section>
+          <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Vencimiento</th><th>Situación</th></tr></thead><tbody id="g-pend-f"></tbody></table><p id="g-pend-v" class="vacio" hidden>No hay pagos pendientes.</p></section>
         <section class="tarjeta tabla-tarjeta" id="g-cambios"><div class="tarj-t"><h3>Cambios de evidencia</h3></div>
-          <table><thead><tr><th>Pago</th><th>Intento</th><th>Fecha y hora del cambio</th><th></th></tr></thead><tbody id="g-cambios-f"></tbody></table><p id="g-cambios-v" class="vacio" hidden>No hay cambios de evidencia.</p></section>
+          <table><thead><tr><th>ID</th><th>Pago</th><th>Intento</th><th>Fecha y hora del cambio</th><th></th></tr></thead><tbody id="g-cambios-f"></tbody></table><p id="g-cambios-v" class="vacio" hidden>No hay cambios de evidencia.</p></section>
       </div>
     </div>
   </div>
@@ -114,7 +105,7 @@
         <section id="resumen" class="resumen"></section>
         <section id="m-vista-lista" class="tarjeta tabla-tarjeta">
           <table>
-            <thead><tr><th>Concepto</th><th>Categoría</th><th class="der">Monto</th><th>Vencimiento</th><th>Estado</th><th>Fecha y hora de pago</th><th></th></tr></thead>
+            <thead><tr><th>ID</th><th>Concepto</th><th>Categoría</th><th class="der">Monto</th><th>Vencimiento</th><th>Estado</th><th>Fecha y hora de pago</th><th></th></tr></thead>
             <tbody id="filas"></tbody>
           </table>
         </section>
@@ -127,7 +118,7 @@
           <p class="subtitulo">Pendientes que vencen entre hoy y los próximos <span id="dias-vencer">3</span> días, y los atrasados</p></div></div>
         <section class="tarjeta tabla-tarjeta">
           <table>
-            <thead><tr><th>Concepto</th><th>Categoría</th><th class="der">Monto</th><th>Vencimiento</th><th>Situación</th><th></th></tr></thead>
+            <thead><tr><th>ID</th><th>Concepto</th><th>Categoría</th><th class="der">Monto</th><th>Vencimiento</th><th>Situación</th><th></th></tr></thead>
             <tbody id="filas-vencer"></tbody>
           </table>
         </section>
@@ -158,7 +149,7 @@
     <h3>Registrar pago por realizar</h3>
     <div id="nuevo-paso1">
       <label>Concepto <input id="n-concepto" maxlength="100"><span class="campo-error" data-err="concepto"></span></label>
-      <label>Entidad asociada (empresa o persona a la que se paga) <input id="n-entidad" maxlength="100"><span class="campo-error" data-err="entidad"></span></label>
+      <label>Entidad asociada (empresa o persona a la que se paga; solo letras) <input id="n-entidad" maxlength="100" autocomplete="off"><span class="campo-error" data-err="entidad"></span></label>
       <label>Categoría <select id="sel-cat"></select><span class="campo-error" data-err="categoria_id"></span></label>
       <label>Monto (S/) <input id="n-monto" inputmode="decimal" placeholder="0.00"><span class="campo-error" data-err="monto"></span></label>
       <label>Fecha de vencimiento <input id="n-venc" type="date"><span class="campo-error" data-err="fecha_vencimiento"></span></label>
@@ -201,6 +192,7 @@
     <dl class="datos" id="cambiar-datos"></dl>
     <div id="cambiar-paso1">
       <label>Nuevo archivo (JPG, PNG o PDF, máx. 5 MB) <input type="file" id="cambiar-archivo" accept="image/jpeg,image/png,application/pdf"><span class="campo-error" id="err-cambiar-archivo"></span></label>
+      <label>Comentario (opcional) <textarea id="cambiar-coment" maxlength="300" rows="2"></textarea></label>
       <p class="aviso-chico">ℹ️ El archivo vigente se guardará como intento previo y quedará visible para el gerente.</p>
       <menu><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="cambiar-continuar">Continuar</button></menu>
     </div>

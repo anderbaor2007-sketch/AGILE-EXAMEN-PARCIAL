@@ -201,3 +201,6 @@ textarea { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; bor
   .lateral-marca { padding: 0 8px; } .lateral-nav { flex-direction: row; flex-wrap: wrap; } .lateral-nav a, .lateral-salir { padding: 8px 10px; font-size: .8rem; }
   .dash-main { padding: 16px; } .cal-dia { min-height: 60px; } .cal-pago { font-size: .6rem; }
 }
+
+td.cod { font-family: ui-monospace, Consolas, monospace; font-size: .8rem; font-weight: 700; color: var(--navy-2); white-space: nowrap; }
+.evid-com { color: var(--gris); font-size: .85rem; margin: -4px 0 8px; }

@@ -71,6 +71,13 @@ test('HU-05 registrar pago por realizar (validaciones, límites, repetido)', asy
   assert.ok((await crear({ fecha_vencimiento: hoy() })).json.campos.fecha_vencimiento);                  // debe ser futura
   assert.ok((await crear({ fecha_vencimiento: mas(-3) })).json.campos.fecha_vencimiento);
   assert.ok((await crear({ fecha_vencimiento: '2026-02-31' })).json.campos.fecha_vencimiento);
+  // Entidad: solo letras
+  for (const e of ['Banco 123', 'Movistar&Co', 'SAT-Trujillo', 'Ent.']) assert.match((await crear({ entidad: e })).json.campos.entidad, /solo puede contener letras/, e);
+  assert.equal((await crear({ concepto: 'Con tildes', entidad: 'Compañía Ñandú Perú', fecha_vencimiento: mas(14) })).status, 201);
+  // Vencimiento: máximo 1 año desde el registro
+  const unAnio = new Date(hoy() + 'T00:00:00Z'); unAnio.setUTCFullYear(unAnio.getUTCFullYear() + 1);
+  assert.match((await crear({ fecha_vencimiento: mas(367) })).json.campos.fecha_vencimiento, /1 año/);
+  assert.equal((await crear({ concepto: 'Un año justo', entidad: 'Banco', fecha_vencimiento: unAnio.toISOString().slice(0, 10) })).status, 201);
   // Registro correcto: queda Pendiente
   const ok = await crear({ concepto: 'Luz', entidad: 'Hidrandina', fecha_vencimiento: mas(20) }); assert.equal(ok.status, 201);
   const [fila] = await query('SELECT estado, entidad FROM pagos WHERE id = $1', [ok.json.id]);
@@ -159,6 +166,13 @@ test('HU-07 cambiar evidencia (máx. 3, intento previo) y HU-03 evidencias solo 
   const filas = await query('SELECT vigente, numero_intento, reemplazada_en FROM evidencias WHERE pago_id=$1 ORDER BY id', [id]);
   assert.equal(filas.length, 4); assert.equal(filas.filter((f) => f.vigente).length, 1);                  // una sola vigente
   assert.deepEqual(filas.filter((f) => !f.vigente).map((f) => Number(f.numero_intento)), [1, 2, 3]);
+  // Comentario en el cambio de evidencia (por archivo) e identificador autogenerado
+  const idc = (await crear({ concepto: 'Con comentario', fecha_vencimiento: mas(9) })).json.id; await pagarCon(idc, PNG, { 'X-Comentario': encodeURIComponent('primero') });
+  assert.equal((await pedir(asistente, 'PUT', `/api/pagos/${idc}/evidencia`, JPG, { 'X-Comentario': encodeURIComponent('corregido por error de foto') })).status, 200);
+  const ic = (await pedir(gerente, 'GET', `/api/pagos/${idc}/evidencias`)).json;
+  assert.equal(ic.vigente.comentario, 'corregido por error de foto'); assert.equal(ic.previos[0].comentario, 'primero');
+  assert.match(ic.pago.codigo, /^PAG-\d{4}$/);
+  assert.match((await pedir(asistente, 'GET', '/api/pagos')).json.pagos[0].codigo, /^PAG-\d{4}$/);
   // Asistente: no ve evidencias
   assert.equal((await pedir(asistente, 'GET', `/api/pagos/${id}/evidencias`)).status, 403);
   const [{ id: evId }] = await query('SELECT id FROM evidencias WHERE pago_id=$1 LIMIT 1', [id]);
@@ -198,7 +212,7 @@ test('HU-02 panel de monitoreo (solo gerente)', async () => {
   const clave = (p) => `${p.fecha_pago} ${p.hora_pago}`; assert.deepEqual(d.pagados.map(clave), d.pagados.map(clave).sort().reverse());   // lo pagado: reciente → antiguo
   assert.ok(d.pagados.every((p) => p.categoria && p.entidad && p.hora_pago));
   assert.ok(d.pendientes.some((p) => p.alerta === 'ATRASADO'));
-  assert.equal(d.cambios.length, 4); assert.ok(d.cambios.every((c) => c.numero_intento && c.fecha_hora && c.concepto));   // «Cambios de evidencia»
+  assert.equal(d.cambios.length, 5); assert.ok(d.cambios.every((c) => c.numero_intento && c.fecha_hora && c.concepto));   // «Cambios de evidencia»
   // sin cambios si no hay pagos
   await query('TRUNCATE evidencias, pagos RESTART IDENTITY CASCADE');
   const v = await pedir(gerente, 'GET', '/api/panel'); assert.equal(v.json.hay_pagos, false);

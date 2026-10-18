@@ -9,6 +9,8 @@ const MAX_CAMBIOS_EVIDENCIA = 3;                                      // HU-07: 
 const DIAS_MAX_ATRAS_PAGO = 7;                                        // HU-06: el pago no puede ser anterior a 1 semana
 const LIMITE_MONTO = { Servicios: 20000 };                            // HU-05: tope por categoría (S/)
 const LIMITE_MONTO_OTROS = 500000;                                    // Préstamos, Proveedores, Impuestos
+const MESES_MAX_VENCIMIENTO = 12;                                     // el vencimiento no puede pasar de 1 año desde el registro
+const SOLO_LETRAS = /^[\p{L}]+(?: [\p{L}]+)*$/u;                     // entidad: solo letras (con tildes/ñ) y espacios
 const FORMATOS = 'Formatos admitidos: JPG, PNG o PDF.';
 
 // ---- Fechas (siempre hora de Lima) ----
@@ -18,12 +20,13 @@ const horaAhora = () => new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '
 const esFecha = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '') && new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) === s;
 const esHora = (s) => /^([01]\d|2[0-3]):[0-5]\d$/.test(s || '');
 const sumaDias = (f, n) => { const d = new Date(f + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const sumaAnio = (f) => { const d = new Date(f + 'T00:00:00Z'); d.setUTCFullYear(d.getUTCFullYear() + 1); return d.toISOString().slice(0, 10); };
 const diasEntre = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
 const err = (status, error, campos) => ({ status, json: campos ? { error, campos } : { error } });
 const redondeo = (n) => Math.round(n * 100) / 100;
 
 const SELECT = `
-  SELECT p.id, p.concepto, p.entidad, p.categoria_id, p.monto::float8 AS monto, p.fecha_vencimiento, p.estado, p.fecha_pago, p.hora_pago, p.comentario,
+  SELECT p.id, 'PAG-' || lpad(p.id::text, 4, '0') AS codigo, p.concepto, p.entidad, p.categoria_id, p.monto::float8 AS monto, p.fecha_vencimiento, p.estado, p.fecha_pago, p.hora_pago, p.comentario,
          c.nombre AS categoria, e.nombre_original AS evidencia_nombre, e.tipo_mime AS evidencia_tipo, (e.id IS NOT NULL) AS tiene_evidencia,
          (SELECT count(*)::int FROM evidencias x WHERE x.pago_id = p.id AND NOT x.vigente) AS intentos_usados
   FROM pagos p JOIN categorias c ON c.id = p.categoria_id LEFT JOIN evidencias e ON e.pago_id = p.id AND e.vigente`;
@@ -83,7 +86,7 @@ async function panel() {
   };
   // «Cambios de evidencia»: archivos reemplazados (intentos previos), el más reciente primero
   const cambios = await query(`
-    SELECT e.id AS evidencia_id, e.numero_intento, p.id AS pago_id, p.concepto, p.entidad,
+    SELECT e.id AS evidencia_id, e.numero_intento, p.id AS pago_id, 'PAG-' || lpad(p.id::text, 4, '0') AS codigo, p.concepto, p.entidad,
            to_char(e.reemplazada_en AT TIME ZONE 'America/Lima', 'DD/MM/YYYY HH24:MI') AS fecha_hora
     FROM evidencias e JOIN pagos p ON p.id = e.pago_id WHERE NOT e.vigente ORDER BY e.reemplazada_en DESC LIMIT 30`);
   return { status: 200, json: { hoy: h, mes, hay_pagos: filas.length > 0, resumen, hoy_lista: hoyLista, pagados, pendientes, cambios } };
@@ -109,6 +112,7 @@ async function validarNuevo(body) {
   const entidad = String(body.entidad ?? '').trim();
   if (!entidad) campos.entidad = 'Ingresa la entidad (empresa o persona a la que se paga)';
   else if (entidad.length > 100) campos.entidad = 'La entidad no puede superar 100 caracteres';
+  else if (!SOLO_LETRAS.test(entidad)) campos.entidad = 'La entidad solo puede contener letras (sin números ni caracteres especiales)';
 
   const catId = Number(body.categoria_id);
   const [cat] = Number.isInteger(catId) && catId > 0 ? await query('SELECT id, nombre FROM categorias WHERE id = $1', [catId]) : [];
@@ -127,6 +131,7 @@ async function validarNuevo(body) {
   if (!f) campos.fecha_vencimiento = 'Ingresa la fecha de vencimiento';
   else if (!esFecha(f)) campos.fecha_vencimiento = 'La fecha de vencimiento no es válida';
   else if (f <= hoy()) campos.fecha_vencimiento = 'La fecha de vencimiento debe ser una fecha futura';
+  else if (f > sumaAnio(hoy())) campos.fecha_vencimiento = 'El vencimiento no puede ser mayor a 1 año desde hoy';
 
   if (Object.keys(campos).length) return { e: err(400, 'Corrige los campos indicados', campos) };
   return { datos: { concepto, entidad, cat, monto: Number(montoTxt), fecha_vencimiento: f } };
@@ -190,8 +195,8 @@ async function pagar({ params, bodyCrudo, headers, usuario }) {
       UPDATE pagos SET estado='PAGADO', fecha_pago=$2, hora_pago=$3, comentario=$4, pagado_por=$5
       WHERE id=$1 AND estado='PENDIENTE' RETURNING id
     )
-    INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por)
-    SELECT id, $6, $7, $8, $5 FROM u RETURNING pago_id`,
+    INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, comentario)
+    SELECT id, $6, $7, $8, $5, $4 FROM u RETURNING pago_id`,
     [p.id, fecha, hora, comentario, usuario.id, bodyCrudo, v.nombre, v.tipo[0]]);
   if (!r.length) return err(409, 'Solo se puede registrar como realizado un pago Pendiente.');
   return { status: 200, json: { ok: true, concepto: p.concepto, fecha_pago: fecha, hora_pago: hora, archivo: v.nombre } };
@@ -204,14 +209,17 @@ async function cambiarEvidencia({ params, bodyCrudo, headers, usuario }) {
   if (p.estado !== 'PAGADO') return err(409, 'Solo se puede cambiar la evidencia de un pago Pagado.');
   const [{ usados }] = await query('SELECT count(*)::int AS usados FROM evidencias WHERE pago_id = $1 AND NOT vigente', [p.id]);
   if (usados >= MAX_CAMBIOS_EVIDENCIA) return err(409, `Se alcanzó el máximo de ${MAX_CAMBIOS_EVIDENCIA} intentos de cambio de evidencia.`);
+  let comentario = null;
+  try { comentario = decodeURIComponent(headers['x-comentario'] || '').trim() || null; } catch { comentario = null; }
+  if (comentario && comentario.length > 300) return err(400, 'El comentario no puede superar 300 caracteres.', { comentario: 'Máximo 300 caracteres' });
   const v = validarArchivo(bodyCrudo, headers); if (v.e) return v.e;
 
   const [{ vig }] = await query('SELECT count(*)::int AS vig FROM evidencias WHERE pago_id = $1 AND vigente', [p.id]);
   let r;
   if (!vig) {
     // Pago Pagado que (por datos antiguos) no tiene archivo vigente: el nuevo pasa a ser la evidencia vigente, sin gastar un intento.
-    r = await query('INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, vigente) VALUES ($1,$2,$3,$4,$5,true) RETURNING pago_id',
-      [p.id, bodyCrudo, v.nombre, v.tipo[0], usuario.id]);
+    r = await query('INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, vigente, comentario) VALUES ($1,$2,$3,$4,$5,true,$6) RETURNING pago_id',
+      [p.id, bodyCrudo, v.nombre, v.tipo[0], usuario.id, comentario]);
     if (r.length) return { status: 200, json: { ok: true, intentos_restantes: MAX_CAMBIOS_EVIDENCIA - usados, sin_vigente: true } };
   }
   // Un solo comando: archiva la vigente (con su número de intento y hora) y deja la nueva como vigente.
@@ -221,9 +229,9 @@ async function cambiarEvidencia({ params, bodyCrudo, headers, usuario }) {
       WHERE pago_id = $1 AND vigente AND (SELECT count(*) FROM evidencias WHERE pago_id = $1 AND NOT vigente) < ${MAX_CAMBIOS_EVIDENCIA}
       RETURNING pago_id
     )
-    INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, vigente)
-    SELECT pago_id, $2, $3, $4, $5, true FROM u RETURNING pago_id`,
-    [p.id, bodyCrudo, v.nombre, v.tipo[0], usuario.id]);
+    INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, vigente, comentario)
+    SELECT pago_id, $2, $3, $4, $5, true, $6 FROM u RETURNING pago_id`,
+    [p.id, bodyCrudo, v.nombre, v.tipo[0], usuario.id, comentario]);
   if (!r.length) return err(409, 'No fue posible cambiar la evidencia de este pago.');
   return { status: 200, json: { ok: true, intentos_restantes: MAX_CAMBIOS_EVIDENCIA - (usados + 1) } };
 }
@@ -235,12 +243,12 @@ async function infoEvidencias({ params }) {
   if (!p) return err(404, 'Pago no encontrado');
   if (p.estado === 'PENDIENTE') return err(409, 'Este pago aún no tiene evidencia porque no se ha registrado como realizado.');
   const archivos = await query(`
-    SELECT id, vigente, numero_intento, nombre_original AS nombre, tipo_mime AS tipo,
+    SELECT id, vigente, numero_intento, nombre_original AS nombre, tipo_mime AS tipo, comentario,
            to_char(reemplazada_en AT TIME ZONE 'America/Lima', 'DD/MM/YYYY HH24:MI') AS reemplazada_en
     FROM evidencias WHERE pago_id = $1 ORDER BY vigente DESC, numero_intento DESC`, [p.id]);
   if (!archivos.length) return err(404, 'Este pago no tiene evidencia.');
-  const { id, concepto, entidad, monto, fecha_pago, hora_pago, comentario } = p;
-  return { status: 200, json: { pago: { id, concepto, entidad, monto, fecha_pago, hora_pago, comentario }, vigente: archivos.find((a) => a.vigente), previos: archivos.filter((a) => !a.vigente) } };
+  const { id, codigo, concepto, entidad, monto, fecha_pago, hora_pago, comentario } = p;
+  return { status: 200, json: { pago: { id, codigo, concepto, entidad, monto, fecha_pago, hora_pago, comentario }, vigente: archivos.find((a) => a.vigente), previos: archivos.filter((a) => !a.vigente) } };
 }
 // GET /api/evidencias/:id[?descargar=1] — ver o descargar un archivo (vigente o intento previo)
 async function verArchivo({ params, query: qs }) {
