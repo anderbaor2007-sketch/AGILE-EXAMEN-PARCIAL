@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Castillo · Sistema de Egresos</title>
+  <link rel="icon" href="logo-icono.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- ============ LOGIN ============ -->
+  <main id="vista-login" class="login" hidden>
+    <div class="login-caja">
+      <section class="login-form">
+        <img class="login-logo" src="logo.png" alt="Castillo · Sistema de control de egresos">
+        <h1>Iniciar sesión</h1>
+        <p class="login-sub">Ingrese sus credenciales para acceder al sistema</p>
+        <form id="form-login" novalidate>
+          <label>Usuario <input name="usuario" placeholder="Usuario" autocomplete="username" autocapitalize="none" spellcheck="false"><span class="campo-error" id="err-usuario"></span></label>
+          <label>Contraseña <input name="clave" type="password" placeholder="Contraseña" autocomplete="current-password"><span class="campo-error" id="err-clave"></span></label>
+          <p id="error-login" class="error" role="alert"></p>
+          <button class="btn btn-primario btn-ancho">INGRESAR</button>
+        </form>
+        <p class="login-pie">© Empresa Castillo · Acceso restringido</p>
+      </section>
+      <section class="login-arte" aria-hidden="true">
+        <svg viewBox="0 0 600 700" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <linearGradient id="w1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0a2a7a"/><stop offset="1" stop-color="#2a6fe0"/></linearGradient>
+            <linearGradient id="w2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f5e3c8"/><stop offset=".55" stop-color="#9fc4f2"/><stop offset="1" stop-color="#1e57c9"/></linearGradient>
+            <filter id="d"><feGaussianBlur stdDeviation="14"/></filter>
+          </defs>
+          <rect width="600" height="700" fill="url(#w1)"/>
+          <path d="M330 -20C470 120 250 250 330 380C400 500 540 520 600 600V-20Z" fill="url(#w2)" filter="url(#d)" opacity=".95"/>
+          <path d="M260 -20C380 130 160 260 250 400C330 520 470 560 600 700H0V-20Z" fill="#0a2468" opacity=".55" filter="url(#d)"/>
+        </svg>
+        <div class="login-bienvenida"><h2>Bienvenido.</h2><p>Sistema de control de egresos de la empresa Castillo. Registre, consulte y supervise los pagos de forma segura.</p></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ============ GERENTE: panel de monitoreo (HU-02) ============ -->
+  <div id="vista-gerente" class="dash" hidden>
+    <aside class="lateral">
+      <div class="lateral-marca"><img class="logo-mini" src="logo-icono.png" alt="Logo Castillo" width="44" height="44"><div><b>Castillo</b><small>Egresos</small></div></div>
+      <nav class="lateral-nav">
+        <a href="#g-resumen" class="activo"><span>▦</span> Panel</a>
+        <a href="#g-hoy"><span>◷</span> Pagos de hoy</a>
+        <a href="#g-pagado"><span>✔</span> Lo pagado</a>
+        <a href="#g-pend"><span>⏳</span> Pendientes</a>
+        <a href="#g-cambios"><span>⟳</span> Cambios de evidencia</a>
+      </nav>
+      <button id="g-salir" class="lateral-salir"><span>⎋</span> Cerrar sesión</button>
+    </aside>
+    <div class="dash-main">
+      <header class="dash-top">
+        <div><h1>Panel de monitoreo</h1><p id="g-sub" class="subtitulo"></p></div>
+        <div class="dash-top-der">
+          <button id="g-actualizar" class="btn btn-claro">⟳ Actualizar</button>
+          <div class="avatar" id="g-avatar">G</div><div class="dash-user"><b id="g-usuario"></b><small>Gerente</small></div>
+        </div>
+      </header>
+      <p id="g-error" class="vacio error" hidden></p>
+      <div id="g-contenido">
+        <section id="g-resumen" class="g-kpis"></section>
+        <p id="g-vacio" class="vacio" hidden>No hay pagos registrados para este mes.</p>
+
+        <section class="tarjeta tabla-tarjeta" id="g-hoy"><div class="tarj-t"><h3>Pagos de hoy</h3></div>
+          <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Estado</th></tr></thead><tbody id="g-hoy-f"></tbody></table><p id="g-hoy-v" class="vacio" hidden>No hay pagos con vencimiento hoy.</p></section>
+        <section class="tarjeta tabla-tarjeta" id="g-pagado"><div class="tarj-t"><h3>Lo pagado</h3><small>Del más reciente al más antiguo</small></div>
+          <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th>Categoría</th><th class="der">Monto</th><th>Fecha y hora de pago</th><th>Método de pago</th><th></th></tr></thead><tbody id="g-pagado-f"></tbody></table><p id="g-pagado-v" class="vacio" hidden>Aún no hay pagos realizados este mes.</p></section>
+        <section class="tarjeta tabla-tarjeta" id="g-pend"><div class="tarj-t"><h3>Pendientes del mes</h3><small>Los atrasados aparecen marcados</small></div>
+          <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Vencimiento</th><th>Situación</th></tr></thead><tbody id="g-pend-f"></tbody></table><p id="g-pend-v" class="vacio" hidden>No hay pagos pendientes.</p></section>
+        <section class="tarjeta tabla-tarjeta" id="g-cambios"><div class="tarj-t"><h3>Cambios de evidencia</h3></div>
+          <table><thead><tr><th>ID</th><th>Pago</th><th>Intento</th><th>Fecha y hora del cambio</th><th></th></tr></thead><tbody id="g-cambios-f"></tbody></table><p id="g-cambios-v" class="vacio" hidden>No hay cambios de evidencia.</p></section>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ ASISTENTE (HU-04, HU-05, HU-06, HU-07, HU-08, HU-09) ============ -->
+  <div id="vista-asist" hidden>
+    <header class="barra">
+      <div class="marca"><img class="logo-mini" src="logo-icono.png" alt="" width="38" height="38"><div><b>Castillo</b><small>Sistema de Egresos</small></div></div>
+      <div class="barra-der"><span id="usuario" class="usuario"></span><button id="btn-salir" class="btn btn-barra">Cerrar sesión</button></div>
+    </header>
+    <div class="contenedor">
+      <nav class="tabs">
+        <button class="tab activa" data-vista="mes">Pagos del mes</button>
+        <button class="tab" data-vista="vencer">Por vencer <span id="n-vencer" class="insignia">0</span></button>
+      </nav>
+
+      <section id="vista-mes">
+        <div class="titulo-fila">
+          <div><h2 class="titulo">Pagos del mes</h2><p class="subtitulo">Qué se paga, a quién, cuánto y cuándo vence — en soles (S/)</p></div>
+          <div class="acciones-titulo">
+            <button id="btn-nuevo" class="btn btn-primario">＋ Registrar pago por realizar</button>
+            <div class="conmutar"><button id="m-lista" class="activo">Lista</button><button id="m-cal">Calendario</button></div>
+            <div class="selector-mes">
+              <button id="mes-ant" class="btn btn-claro" aria-label="Mes anterior">‹</button><h3 id="mes-titulo"></h3><button id="mes-sig" class="btn btn-claro" aria-label="Mes siguiente">›</button>
+            </div>
+          </div>
+        </div>
+        <section id="resumen" class="resumen"></section>
+        <section id="m-vista-lista" class="tarjeta tabla-tarjeta">
+          <table>
+            <thead><tr><th>ID</th><th>Concepto</th><th>Categoría</th><th class="der">Monto</th><th>Vencimiento</th><th>Estado</th><th>Fecha y hora de pago</th><th></th></tr></thead>
+            <tbody id="filas"></tbody>
+          </table>
+        </section>
+        <section id="m-vista-cal" class="tarjeta" hidden></section>
+        <p id="vacio-mes" class="vacio" hidden></p>
+      </section>
+
+      <section id="vista-vencer" hidden>
+        <div class="titulo-fila"><div><h2 class="titulo">Pagos por vencer</h2>
+          <p class="subtitulo">Pendientes que vencen entre hoy y los próximos <span id="dias-vencer">3</span> días, y los atrasados</p></div></div>
+        <section class="tarjeta tabla-tarjeta">
+          <table>
+            <thead><tr><th>ID</th><th>Concepto</th><th>Categoría</th><th class="der">Monto</th><th>Vencimiento</th><th>Situación</th><th></th></tr></thead>
+            <tbody id="filas-vencer"></tbody>
+          </table>
+        </section>
+        <p id="vacio-vencer" class="vacio" hidden></p>
+      </section>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <dialog id="dlg-msg">
+    <h3 id="msg-titulo"></h3>
+    <p id="msg-texto" class="msg-texto"></p>
+    <menu><button id="msg-extra" class="btn btn-claro" hidden></button><button id="msg-ok" class="btn btn-primario">Aceptar</button></menu>
+  </dialog>
+
+  <!-- HU-03: evidencia (solo gerente) -->
+  <dialog id="dlg-evid" class="ancho">
+    <h3 id="evid-titulo">Evidencia del pago</h3>
+    <dl class="datos" id="evid-datos"></dl>
+    <div id="evid-cuerpo" class="evid-cuerpo"></div>
+    <div id="evid-previos"></div>
+    <menu><a id="evid-descargar" class="btn btn-claro" hidden>⬇ Descargar</a><button id="evid-cerrar" class="btn btn-primario">Cerrar</button></menu>
+  </dialog>
+
+  <!-- HU-05: registrar pago por realizar -->
+  <dialog id="dlg-nuevo">
+    <h3>Registrar pago por realizar</h3>
+    <div id="nuevo-paso1">
+      <label>Categoría <select id="sel-cat"></select><span class="campo-error" data-err="categoria_id"></span></label>
+
+      <!-- Servicios -->
+      <div class="cat-form" id="f-Servicios" hidden>
+        <label>Servicio <select id="n-tipo"><option value="">Selecciona…</option><option>Agua</option><option>Luz</option><option>Internet</option></select><span class="campo-error" data-err="tipo_servicio"></span></label>
+        <label>Entidad (empresa a la que se paga; solo letras) <input id="n-ent-serv" maxlength="100" autocomplete="off"><span class="campo-error" data-err="entidad"></span></label>
+        <label>Número de recibo <input id="n-recibo" maxlength="30" autocomplete="off"><span class="campo-error" data-err="numero_recibo"></span></label>
+        <label id="lab-suministro" hidden>Código de suministro <input id="n-suministro" maxlength="20" autocomplete="off"><span class="campo-error" data-err="codigo_suministro"></span></label>
+      </div>
+
+      <!-- Proveedores -->
+      <div class="cat-form" id="f-Proveedores" hidden>
+        <label>RUC del proveedor (11 dígitos) <input id="n-ruc" maxlength="11" inputmode="numeric" autocomplete="off"><span class="campo-error" data-err="ruc"></span></label>
+        <label>Razón social <input id="n-razon" maxlength="100" autocomplete="off"><span class="campo-error" data-err="razon_social"></span></label>
+      </div>
+
+      <!-- Impuestos -->
+      <div class="cat-form" id="f-Impuestos" hidden>
+        <label>Entidad <select id="n-ent-imp"><option value="">Selecciona…</option><option>SUNAT</option><option>SAT</option></select><span class="campo-error" data-err="entidad"></span></label>
+        <label>Impuesto <select id="n-imp"><option value="">Primero elige la entidad</option></select><span class="campo-error" data-err="concepto_impuesto"></span></label>
+      </div>
+
+      <!-- Monto y vencimiento (Servicios, Proveedores e Impuestos) -->
+      <div class="cat-form" id="f-comun" hidden>
+        <label>Monto (S/) <input id="n-monto" inputmode="decimal" placeholder="0.00"><span class="campo-error" data-err="monto"></span></label>
+        <label>Fecha de vencimiento <input id="n-venc" type="date"><span class="campo-error" data-err="fecha_vencimiento"></span></label>
+      </div>
+
+      <!-- Préstamos -->
+      <div class="cat-form" id="f-Préstamos" hidden>
+        <label>Entidad bancaria (solo letras) <input id="n-ent-pre" maxlength="100" autocomplete="off"><span class="campo-error" data-err="entidad"></span></label>
+        <label>Monto total del préstamo (S/) <input id="n-monto-total" inputmode="decimal" placeholder="0.00"><span class="campo-error" data-err="monto_total"></span></label>
+        <div class="dos-col">
+          <label>Número de cuotas <input id="n-cuotas" inputmode="numeric" maxlength="2" placeholder="Ej. 12"><span class="campo-error" data-err="num_cuotas"></span></label>
+          <label>Mora (% anual) <input id="n-mora" inputmode="decimal" placeholder="Ej. 18.5"><span class="campo-error" data-err="mora_tna"></span></label>
+        </div>
+        <p class="aviso-chico">ℹ️ La mora es una tasa nominal anual (base 360 días). Por cada día de atraso de una cuota se suma al monto: cuota × mora ÷ 360.</p>
+        <label>Fecha en que vence el préstamo total <input id="n-venc-total" type="date"><span class="campo-error" data-err="fecha_vencimiento_total"></span></label>
+        <label>Día en que empieza a pagar la primera cuota <input id="n-primera" type="date"><span class="campo-error" data-err="fecha_primera_cuota"></span></label>
+        <p class="aviso-chico">Las demás cuotas se generan cada mes, el mismo día, desde la primera cuota.</p>
+      </div>
+
+      <p class="error" id="nuevo-error"></p>
+      <menu><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="nuevo-continuar">Continuar</button></menu>
+    </div>
+    <div id="nuevo-paso2" hidden>
+      <div id="nuevo-dup" class="aviso" hidden></div>
+      <p class="confirma-t">Confirma los datos del pago:</p>
+      <dl class="datos" id="nuevo-resumen"></dl>
+      <div id="nuevo-cuotas" hidden></div>
+      <p class="error" id="nuevo-error2"></p>
+      <menu><button class="btn btn-claro" id="nuevo-volver">Volver</button><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="nuevo-confirmar">Confirmar y registrar</button></menu>
+    </div>
+  </dialog>
+
+  <!-- HU-06: registrar pago como realizado -->
+  <dialog id="dlg-pagar">
+    <h3>Registrar pago como realizado</h3>
+    <dl class="datos" id="pagar-datos"></dl>
+    <div id="pagar-paso1">
+      <div class="dos-col">
+        <label>Fecha de pago <input type="date" id="pagar-fecha"><span class="campo-error" id="err-pagar-fecha"></span></label>
+        <label>Hora de pago <input type="time" id="pagar-hora"><span class="campo-error" id="err-pagar-hora"></span></label>
+      </div>
+      <label>Método de pago <select id="pagar-metodo"></select><span class="campo-error" id="err-pagar-metodo"></span></label>
+      <label id="pagar-sub-lab" hidden><span id="pagar-sub-t"></span> <select id="pagar-sub"></select><span class="campo-error" id="err-pagar-sub"></span></label>
+      <p class="aviso-chico" id="pagar-metodo-nota">Ningún método de pago tiene descuento: el monto a pagar es el mismo.</p>
+      <label>Comentario (opcional) <textarea id="pagar-coment" maxlength="300" rows="2"></textarea></label>
+      <label>Evidencia (JPG, PNG o PDF, máx. 5 MB) <input type="file" id="pagar-archivo" accept="image/jpeg,image/png,application/pdf"><span class="campo-error" id="err-pagar-archivo"></span></label>
+      <menu><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="pagar-continuar">Continuar</button></menu>
+    </div>
+    <div id="pagar-paso2" hidden>
+      <p class="confirma-t">Confirma el registro:</p>
+      <dl class="datos" id="pagar-resumen"></dl>
+      <p class="error" id="pagar-error"></p>
+      <menu><button class="btn btn-claro" id="pagar-volver">Volver</button><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="pagar-confirmar">Confirmar pago realizado</button></menu>
+    </div>
+  </dialog>
+
+  <!-- HU-07: cambiar la evidencia -->
+  <dialog id="dlg-cambiar">
+    <h3>Cambiar evidencia</h3>
+    <dl class="datos" id="cambiar-datos"></dl>
+    <div id="cambiar-paso1">
+      <label>Nuevo archivo (JPG, PNG o PDF, máx. 5 MB) <input type="file" id="cambiar-archivo" accept="image/jpeg,image/png,application/pdf"><span class="campo-error" id="err-cambiar-archivo"></span></label>
+      <label>Comentario (opcional) <textarea id="cambiar-coment" maxlength="300" rows="2"></textarea></label>
+      <p class="aviso-chico">ℹ️ El archivo vigente se guardará como intento previo y quedará visible para el gerente.</p>
+      <menu><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="cambiar-continuar">Continuar</button></menu>
+    </div>
+    <div id="cambiar-paso2" hidden>
+      <p class="confirma-t" id="cambiar-confirma"></p>
+      <p class="error" id="cambiar-error"></p>
+      <menu><button class="btn btn-claro" id="cambiar-volver">Volver</button><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="cambiar-confirmar">Confirmar cambio</button></menu>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
