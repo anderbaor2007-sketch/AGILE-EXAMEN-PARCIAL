@@ -207,11 +207,11 @@ async function validarNuevo(body) {
     fila.entidad = validarEntidad(body, campos);
     const rec = t('numero_recibo');
     if (!rec) campos.numero_recibo = 'Ingresa el número de recibo';
-    else if (rec.length > 30 || !SOLO_ALFANUM.test(rec)) campos.numero_recibo = 'El número de recibo solo puede tener letras, números y guiones (máx. 30)';
+    else if (rec.length > 30 || !SOLO_ALFANUM.test(rec)) campos.numero_recibo = 'El número de recibo solo puede tener letras, números y guiones';
     if (tipo === 'Luz' || tipo === 'Agua') {
       const cod = t('codigo_suministro');
       if (!cod) campos.codigo_suministro = 'Ingresa el código de suministro';
-      else if (cod.length > 20 || !SOLO_ALFANUM.test(cod)) campos.codigo_suministro = 'El código de suministro solo puede tener letras, números y guiones (máx. 20)';
+      else if (!/^[0-9]{1,12}$/.test(cod)) campos.codigo_suministro = 'El código de suministro solo puede tener números';
       else fila.codigo_suministro = cod;
     }
     Object.assign(fila, { concepto: tipo, tipo_servicio: tipo, numero_recibo: rec });

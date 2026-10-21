@@ -85,6 +85,9 @@ test('HU-05 registrar pago por realizar (formulario por categoría, validaciones
   assert.ok((await crear({ tipo_servicio: 'Gas' })).json.campos.tipo_servicio);
   assert.ok((await crear({ numero_recibo: 'R 1!' })).json.campos.numero_recibo);
   assert.ok((await crear({ codigo_suministro: 'ab cd' })).json.campos.codigo_suministro);
+  assert.ok((await crear({ codigo_suministro: 'AB-123' })).json.campos.codigo_suministro);                  // solo números
+  assert.ok((await crear({ codigo_suministro: '1234567890123' })).json.campos.codigo_suministro);        // más de 12
+  assert.ok((await crear({ numero_recibo: 'R#1' })).json.campos.numero_recibo);                           // recibo: sin caracteres especiales
   const net = await crear({ concepto: 'Internet de prueba', tipo_servicio: 'Internet', entidad: 'Movistar', codigo_suministro: undefined, numero_recibo: 'F001-778' });
   assert.equal(net.status, 201);                                                                          // Internet: sin código de suministro
   const [fn] = await query('SELECT tipo_servicio, numero_recibo, codigo_suministro FROM pagos WHERE id=$1', [net.json.id]);

@@ -360,7 +360,8 @@ function pistaCuotas() {
 }
 $('n-primera').addEventListener('input', pistaCuotas); $('n-venc-total').addEventListener('input', pistaCuotas);
 $('n-cuotas').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, ''); });
-for (const i of ['n-recibo', 'n-suministro']) $(i).addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^A-Za-z0-9-]/g, ''); });
+$('n-recibo').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^A-Za-z0-9-]/g, ''); });
+$('n-suministro').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^0-9]/g, '').slice(0, 12); });
 
 // «Pago atrasado»: la fecha debe ser anterior a hoy (hasta 1 año atrás); si no, debe ser hoy o posterior (hasta 1 año)
 function ajustarFechaVenc() {

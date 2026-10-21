@@ -24,7 +24,7 @@ h1, h2, h3, p { margin: 0; }
 .login { min-height: 100vh; background: #052e22; display: flex; align-items: center; justify-content: center; padding: 28px; }
 .login-caja { width: 100%; max-width: 980px; min-height: 560px; display: grid; grid-template-columns: 400px 1fr; background: #fff; border-radius: 22px; overflow: hidden; box-shadow: 0 30px 80px rgba(0, 0, 0, .45); }
 .login-form { padding: 36px 40px; display: flex; flex-direction: column; justify-content: center; }
-.login-logo { width: 150px; height: 150px; object-fit: contain; align-self: center; margin-bottom: 4px; }
+.login-logo { width: 230px; height: 230px; object-fit: contain; align-self: center; margin-bottom: 4px; }
 .login h1 { font-size: 1.55rem; font-weight: 800; color: var(--navy); }
 .login-sub { color: var(--gris); font-size: .85rem; margin: 4px 0 14px; }
 .login label { display: block; font-size: .8rem; font-weight: 700; color: var(--navy-2); margin: 12px 0; }
