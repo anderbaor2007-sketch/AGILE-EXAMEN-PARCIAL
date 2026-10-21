@@ -91,9 +91,10 @@ test('HU-05 registrar pago por realizar (formulario por categoría, validaciones
   assert.deepEqual({ ...fl }, { concepto: 'Luz', entidad: 'Hidrandina', tipo_servicio: 'Luz', codigo_suministro: '123456' });
   // ---- Montos y límites ----
   for (const monto of ['0', '-5', '10.999', 'abc']) assert.ok((await crear({ monto })).json.campos.monto, monto);
-  assert.match((await crear({ monto: '20000.01' })).json.campos.monto, /20,000/);                          // Servicios máx. S/ 20 000
+  assert.match((await crear({ monto: '20000.01' })).json.campos.monto, /no puede exceder los 20 mil soles/);                          // Servicios máx. S/ 20 000
   assert.equal((await crear({ concepto: 'Servicio tope', monto: '20000', fecha_vencimiento: mas(11) })).status, 201);
-  assert.ok((await crear({ categoria_id: 2, monto: '500000.01' })).json.campos.monto);                    // otras: S/ 500 000
+  assert.match((await crear({ categoria_id: 2, monto: '500000.01' })).json.campos.monto, /no puede exceder los 500 mil soles/);
+  assert.match((await crear({ monto: '12000000000.00' })).json.campos.monto, /no puede exceder los 20 mil soles/);   // un monto enorme también da el mensaje de «excede»                    // otras: S/ 500 000
   assert.equal((await crear({ concepto: 'Proveedor tope', categoria_id: 2, monto: '500000', fecha_vencimiento: mas(12) })).status, 201);
   // ---- Fechas ----
   assert.match((await crear({ fecha_vencimiento: mas(-1) })).json.campos.fecha_vencimiento, /anterior a hoy/);
@@ -147,21 +148,29 @@ test('Préstamos: cuotas mensuales, mora (TNA base 360 días) y método de pago 
   const vacio = await pedir(asistente, 'POST', '/api/pagos', { categoria_id: 4 });
   for (const k of ['entidad', 'monto_total', 'num_cuotas', 'mora_tna', 'fecha_vencimiento_total', 'fecha_primera_cuota']) assert.ok(vacio.json.campos[k], k);
   assert.ok((await pedir(asistente, 'POST', '/api/pagos', pr({ entidad: 'Banco 2' }))).json.campos.entidad);
-  assert.ok((await pedir(asistente, 'POST', '/api/pagos', pr({ monto_total: '500000.01' }))).json.campos.monto_total);
-  for (const n of ['0', '61', '1.5', 'x']) assert.ok((await pedir(asistente, 'POST', '/api/pagos', pr({ num_cuotas: n }))).json.campos.num_cuotas, n);
+  assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ monto_total: '2000000.01' }))).json.campos.monto_total, /no puede exceder los 2 millones de soles/);
+  assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ monto_total: '12000000000.00' }))).json.campos.monto_total, /no puede exceder los 2 millones de soles/);
+  assert.equal((await pedir(asistente, 'POST', '/api/pagos/verificar', pr({ monto_total: '2000000', num_cuotas: '4' }))).status, 200);          // justo el tope
+  for (const n of ['0', '121', '1.5', 'x']) assert.ok((await pedir(asistente, 'POST', '/api/pagos', pr({ num_cuotas: n }))).json.campos.num_cuotas, n);
   for (const m of ['-1', '101', 'abc', '10.123']) assert.ok((await pedir(asistente, 'POST', '/api/pagos', pr({ mora_tna: m }))).json.campos.mora_tna, m);
   assert.ok((await pedir(asistente, 'POST', '/api/pagos', pr({ fecha_primera_cuota: mas(-1) }))).json.campos.fecha_primera_cuota);
   assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ fecha_vencimiento_total: mas(1) }))).json.campos.fecha_vencimiento_total, /anterior a la fecha de la primera cuota/);
-  assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ fecha_vencimiento_total: mesesMas(mas(5), 2) }))).json.campos.fecha_vencimiento_total, /última cuota/);   // 4 cuotas no caben
-  assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ fecha_vencimiento_total: mesesMas(hoy(), 61) }))).json.campos.fecha_vencimiento_total, /5 años/);
+  // Coherencia: 1 cuota = 1 mes
+  assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ fecha_vencimiento_total: mesesMas(mas(5), 2) }))).json.campos.num_cuotas, /corresponden 3 cuotas, no 4/);   // 4 cuotas no caben en 3 meses
+  assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ num_cuotas: '20' }))).json.campos.num_cuotas, /corresponden 4 cuotas, no 20/);                       // 20 cuotas para 4 meses
+  assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ num_cuotas: '3' }))).json.campos.num_cuotas, /corresponden 4 cuotas, no 3/);                         // y tampoco menos
+  assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ monto_total: '100' }))).json.campos.num_cuotas, /cuota mínima es S\/ 50\.00/);                      // 4 cuotas de S/ 25: no coherente con el monto
+  const diezAnios = pr({ monto_total: '120000', num_cuotas: '120', fecha_primera_cuota: mas(5), fecha_vencimiento_total: mesesMas(mas(5), 119) });
+  const v120 = await pedir(asistente, 'POST', '/api/pagos/verificar', diezAnios); assert.equal(v120.status, 200); assert.equal(v120.json.cuotas.length, 120);   // 10 años = 120 cuotas
+  assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ fecha_vencimiento_total: mesesMas(hoy(), 121) }))).json.campos.fecha_vencimiento_total, /10 años/);
   // Previsualización: 4 cuotas mensuales el mismo día
   const vista = await pedir(asistente, 'POST', '/api/pagos/verificar', pr({}));
   assert.equal(vista.status, 200); assert.equal(vista.json.cuotas.length, 4);
   assert.deepEqual(vista.json.cuotas.map((c) => c.fecha), [0, 1, 2, 3].map((i) => mesesMas(mas(5), i)));
   assert.deepEqual(vista.json.cuotas.map((c) => c.monto), [300, 300, 300, 300]);
   // Reparto con centavos: la última cuota absorbe la diferencia
-  const v3 = await pedir(asistente, 'POST', '/api/pagos/verificar', pr({ monto_total: '100', num_cuotas: '3', fecha_vencimiento_total: mesesMas(mas(5), 2) }));
-  assert.deepEqual(v3.json.cuotas.map((c) => c.monto), [33.33, 33.33, 33.34]);
+  const v3 = await pedir(asistente, 'POST', '/api/pagos/verificar', pr({ monto_total: '200.02', num_cuotas: '3', fecha_vencimiento_total: mesesMas(mas(5), 2) }));
+  assert.deepEqual(v3.json.cuotas.map((c) => c.monto), [66.67, 66.67, 66.68]);
   // Crear: se generan los pagos (cada uno con su ID) y todos quedan Pendientes
   const r = await pedir(asistente, 'POST', '/api/pagos', pr({})); assert.equal(r.status, 201); assert.equal(r.json.cuotas, 4);
   const filas = await query("SELECT id, concepto, entidad, monto::float8 AS monto, fecha_vencimiento, estado, numero_cuota, total_cuotas, prestamo_id FROM pagos WHERE prestamo_id IS NOT NULL ORDER BY numero_cuota");

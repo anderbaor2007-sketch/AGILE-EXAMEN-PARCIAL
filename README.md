@@ -30,12 +30,12 @@ Pruebas (una por historia de usuario; usar una base **de prueba vacía**, se bor
 | HU-09 Avisos | diálogo al iniciar sesión (solo asistente), calculado desde `por-vencer` |
 
 ## Reglas de negocio (constantes en `src/handlers/pagos.js`)
-- Límite de monto: Servicios S/ 20 000; Proveedores, Impuestos y Préstamos S/ 500 000 (`LIMITE_MONTO`).
+- Límite de monto: Servicios S/ 20 000; Proveedores e Impuestos S/ 500 000; Préstamos S/ 2 000 000 (`LIMITE_MONTO`). Al excederlo: «El monto no puede exceder los … soles».
 - Fecha de pago: no posterior a ahora y no anterior a 7 días (`DIAS_MAX_ATRAS_PAGO`). Evidencia: JPG/PNG/PDF, máx. 5 MB, máx. 3 cambios.
 - Mes actual: pagos que vencen en el mes **+** pendientes de meses anteriores (*Atrasado*). Otros meses: solo los que vencen en ese mes.
 - Pago repetido: misma entidad + categoría + concepto + mismo mes de vencimiento → aviso, el asistente puede confirmar o cancelar.
 - Formulario por categoría (se elige primero): **Servicios** (Agua/Luz/Internet; Luz y Agua piden código de suministro; N.º de recibo), **Proveedores** (RUC de 11 dígitos + razón social), **Impuestos** (SUNAT: IGV o Impuesto a la renta; SAT: predial o vehicular) y **Préstamos**.
-- Préstamos: monto total, N.º de cuotas (1–60), mora (TNA %, base 360 días), vencimiento total y fecha de la primera cuota. Se generan las cuotas mensuales (mismo día cada mes; el monto se reparte en partes iguales y la última absorbe los céntimos). La mora de una cuota atrasada = cuota × TNA ÷ 360 × días de atraso y se suma al monto; al pagar queda fija.
+- Préstamos: monto total (máx. S/ 2 000 000), N.º de cuotas (1–120; 1 cuota = 1 mes, debe coincidir con los meses entre la primera cuota y el vencimiento; cuota mínima S/ 50), mora (TNA %, base 360 días), vencimiento total (máx. 10 años) y fecha de la primera cuota. Se generan las cuotas mensuales (mismo día cada mes; el monto se reparte en partes iguales y la última absorbe los céntimos). La mora de una cuota atrasada = cuota × TNA ÷ 360 × días de atraso y se suma al monto; al pagar queda fija.
 - Método de pago (se elige al registrar el pago como realizado; sin descuentos): Transferencia (cuenta de la empresa), Efectivo, Billetera digital (Plin, Yape o Agora) o Tarjeta (crédito o débito). En Préstamos solo Transferencia o Tarjeta de crédito.
 - El vencimiento **no se puede modificar** una vez registrado el pago.
 - El usuario distingue mayúsculas (`Gerente`, `Asistente`). Sin espacios; sin datos: "Ingrese usuario y contraseña".

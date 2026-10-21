@@ -271,15 +271,24 @@ $('n-ent-imp').onchange = () => {
 const soloLetras = (e) => { e.target.value = e.target.value.replace(/[^\p{L} ]/gu, '').replace(/ {2,}/g, ' '); };
 $('n-ent-serv').addEventListener('input', soloLetras); $('n-ent-pre').addEventListener('input', soloLetras);
 $('n-ruc').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, ''); });
+// Ayuda en vivo: cuántas cuotas corresponden entre las dos fechas (1 cuota = 1 mes)
+const sumaMeses = (f, n) => { const [y, m, d] = f.split('-').map(Number); const t = new Date(Date.UTC(y, m - 1 + n, 1)); const u = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate(); return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), Math.min(d, u))).toISOString().slice(0, 10); };
+function pistaCuotas() {
+  const p = $('n-primera').value, t = $('n-venc-total').value, h = $('hint-cuotas');
+  h.hidden = !(p && t && t >= p); if (h.hidden) return;
+  let n = 1; while (sumaMeses(p, n) <= t) n++;
+  h.textContent = `ℹ️ Entre ${fmtFecha(p)} y ${fmtFecha(t)} corresponden ${n} ${n === 1 ? 'cuota' : 'cuotas'} (1 cuota por mes).`;
+}
+$('n-primera').addEventListener('input', pistaCuotas); $('n-venc-total').addEventListener('input', pistaCuotas);
 $('n-cuotas').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, ''); });
 for (const i of ['n-recibo', 'n-suministro']) $(i).addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^A-Za-z0-9-]/g, ''); });
 
 $('btn-nuevo').onclick = () => {
   ['n-tipo', 'n-ent-serv', 'n-recibo', 'n-suministro', 'n-ruc', 'n-razon', 'n-ent-imp', 'n-monto', 'n-venc', 'n-ent-pre', 'n-monto-total', 'n-cuotas', 'n-mora', 'n-venc-total', 'n-primera'].forEach((i) => ($(i).value = ''));
-  $('n-ent-imp').onchange(); $('sel-cat').value = ''; mostrarFormulario(); limpiarErrores($('dlg-nuevo'));
+  $('n-ent-imp').onchange(); pistaCuotas(); $('sel-cat').value = ''; mostrarFormulario(); limpiarErrores($('dlg-nuevo'));
   const max = new Date(); max.setFullYear(max.getFullYear() + 1);
   $('n-venc').min = $('n-primera').min = fechaLima(); $('n-venc').max = $('n-primera').max = fechaLima(max);
-  $('n-venc-total').min = fechaLima(); { const m5 = new Date(); m5.setFullYear(m5.getFullYear() + 5); $('n-venc-total').max = fechaLima(m5); }
+  $('n-venc-total').min = fechaLima(); { const m5 = new Date(); m5.setFullYear(m5.getFullYear() + 10); $('n-venc-total').max = fechaLima(m5); }
   $('nuevo-error').textContent = ''; $('nuevo-error2').textContent = ''; $('nuevo-paso1').hidden = false; $('nuevo-paso2').hidden = true; $('dlg-nuevo').showModal();
 };
 function leerNuevo() {

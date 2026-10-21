@@ -179,15 +179,16 @@
       <!-- Préstamos -->
       <div class="cat-form" id="f-Préstamos" hidden>
         <label>Entidad bancaria (solo letras) <input id="n-ent-pre" maxlength="100" autocomplete="off"><span class="campo-error" data-err="entidad"></span></label>
-        <label>Monto total del préstamo (S/) <input id="n-monto-total" inputmode="decimal" placeholder="0.00"><span class="campo-error" data-err="monto_total"></span></label>
+        <label>Monto total del préstamo (S/) <input id="n-monto-total" inputmode="decimal" placeholder="0.00 (máx. 2 millones)"><span class="campo-error" data-err="monto_total"></span></label>
         <div class="dos-col">
-          <label>Número de cuotas <input id="n-cuotas" inputmode="numeric" maxlength="2" placeholder="Ej. 12"><span class="campo-error" data-err="num_cuotas"></span></label>
+          <label>Número de cuotas <input id="n-cuotas" inputmode="numeric" maxlength="3" placeholder="Ej. 12"><span class="campo-error" data-err="num_cuotas"></span></label>
           <label>Mora (% anual) <input id="n-mora" inputmode="decimal" placeholder="Ej. 18.5"><span class="campo-error" data-err="mora_tna"></span></label>
         </div>
         <p class="aviso-chico">ℹ️ La mora es una tasa nominal anual (base 360 días). Por cada día de atraso de una cuota se suma al monto: cuota × mora ÷ 360.</p>
         <label>Fecha en que vence el préstamo total <input id="n-venc-total" type="date"><span class="campo-error" data-err="fecha_vencimiento_total"></span></label>
         <label>Día en que empieza a pagar la primera cuota <input id="n-primera" type="date"><span class="campo-error" data-err="fecha_primera_cuota"></span></label>
-        <p class="aviso-chico">Las demás cuotas se generan cada mes, el mismo día, desde la primera cuota.</p>
+        <p class="aviso-chico">1 cuota = 1 mes. Las demás cuotas se generan cada mes, el mismo día, desde la primera cuota; el número de cuotas debe coincidir con los meses del préstamo (máx. 10 años / 120 cuotas, cuota mínima S/ 50).</p>
+        <p class="aviso-chico" id="hint-cuotas" hidden></p>
       </div>
 
       <p class="error" id="nuevo-error"></p>

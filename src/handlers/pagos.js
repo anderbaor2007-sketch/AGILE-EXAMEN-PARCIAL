@@ -7,15 +7,16 @@ const DIAS_POR_VENCER = Number(process.env.DIAS_POR_VENCER || 3);     // HU-08: 
 const MAX_BYTES = 5 * 1024 * 1024;                                    // HU-06/07: 5 MB
 const MAX_CAMBIOS_EVIDENCIA = 3;                                      // HU-07: máximo 3 intentos de cambio
 const DIAS_MAX_ATRAS_PAGO = 7;                                        // HU-06: el pago no puede ser anterior a 1 semana
-const LIMITE_MONTO = { Servicios: 20000 };                            // HU-05: tope por categoría (S/)
-const LIMITE_MONTO_OTROS = 500000;                                    // Préstamos, Proveedores, Impuestos
+const LIMITE_MONTO = { Servicios: 20000, 'Préstamos': 2000000 };                            // HU-05: tope por categoría (S/)
+const LIMITE_MONTO_OTROS = 500000;                                    // Proveedores e Impuestos
+const CUOTA_MINIMA = 50;                                              // Préstamos: monto mínimo de cada cuota (S/)
 const MESES_MAX_VENCIMIENTO = 12;                                     // el vencimiento no puede pasar de 1 año desde el registro
 const SOLO_LETRAS = /^[\p{L}]+(?: [\p{L}]+)*$/u;                     // entidad: solo letras (con tildes/ñ) y espacios
 const FORMATOS = 'Formatos admitidos: JPG, PNG o PDF.';
 const SERVICIOS = ['Agua', 'Luz', 'Internet'];                        // Servicios: Luz y Agua piden además código de suministro
 const IMPUESTOS = { SUNAT: ['IGV', 'Impuesto a la renta'], SAT: ['Impuesto predial', 'Impuesto vehicular'] };
-const MAX_CUOTAS = 60;                                                // Préstamos: máximo de cuotas mensuales
-const ANIOS_MAX_PRESTAMO = 5;                                         // Préstamos: el vencimiento total no pasa de 5 años
+const MAX_CUOTAS = 120;                                               // Préstamos: máximo de cuotas mensuales (10 años)
+const ANIOS_MAX_PRESTAMO = 10;                                        // Préstamos: el vencimiento total no pasa de 10 años
 const DIAS_BASE_MORA = 360;                                           // Mora: tasa nominal anual sobre 360 días
 const SOLO_ALFANUM = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;              // Nº de recibo / código de suministro
 const RAZON_SOCIAL = /^[\p{L}\p{N}][\p{L}\p{N} .,&'\-]*$/u;
@@ -147,16 +148,19 @@ const validarEntidad = (body, campos, max = 100) => {
   else if (!SOLO_LETRAS.test(entidad)) campos.entidad = 'La entidad solo puede contener letras (sin números ni caracteres especiales)';
   return entidad;
 };
+const palabrasMonto = (l) => (l >= 1e6 && l % 1e6 === 0 ? `${l / 1e6} ${l === 1e6 ? 'millón' : 'millones'} de soles` : l % 1000 === 0 ? `${l / 1000} mil soles` : `${l.toLocaleString('en-US')} soles`);
 function validarMonto(txt, cat, campo, campos) {
   txt = String(txt ?? '').trim();
   if (!txt) campos[campo] = 'Ingresa el monto en soles (S/)';
-  else if (!/^\d{1,7}(\.\d{1,2})?$/.test(txt) || !(Number(txt) > 0)) campos[campo] = 'El monto debe ser mayor que cero, con hasta dos decimales';
+  else if (!/^\d+(\.\d{1,2})?$/.test(txt) || !(Number(txt) > 0)) campos[campo] = 'El monto debe ser mayor que cero, con hasta dos decimales';
   else {
     const limite = LIMITE_MONTO[cat.nombre] ?? LIMITE_MONTO_OTROS;
-    if (Number(txt) > limite) campos[campo] = `El monto máximo para ${cat.nombre} es S/ ${limite.toLocaleString('en-US')}.00`;
+    if (Number(txt) > limite) campos[campo] = `El monto no puede exceder los ${palabrasMonto(limite)} (S/ ${limite.toLocaleString('en-US')}.00)`;
   }
   return Number(txt);
 }
+// Cuántas cuotas mensuales caben entre la primera cuota y el vencimiento del préstamo (1 cuota = 1 mes)
+const cuotasQueCaben = (primera, total) => { let n = 1; while (sumaMeses(primera, n) <= total) n++; return n; };
 function validarVencimiento(f, campo, campos) {
   if (!f) campos[campo] = 'Ingresa la fecha de vencimiento';
   else if (!esFecha(f)) campos[campo] = 'La fecha de vencimiento no es válida';
@@ -234,10 +238,13 @@ async function validarNuevo(body) {
     else if (!esFecha(total)) campos.fecha_vencimiento_total = 'La fecha de vencimiento del préstamo no es válida';
     else if (primera && esFecha(primera) && total < primera) campos.fecha_vencimiento_total = 'No puede ser anterior a la fecha de la primera cuota';
     else if (total > sumaMeses(hoy(), 12 * ANIOS_MAX_PRESTAMO)) campos.fecha_vencimiento_total = `El préstamo no puede vencer en más de ${ANIOS_MAX_PRESTAMO} años`;
-    if (!Object.keys(campos).length) {
-      cuotas = repartirCuotas(monto, n, primera);
-      if (cuotas[n - 1].fecha > total) campos.fecha_vencimiento_total = `La última cuota (${cuotas[n - 1].fecha.split('-').reverse().join('/')}) quedaría después del vencimiento del préstamo`;
+    // Coherencia: 1 cuota = 1 mes, así que el número de cuotas debe coincidir con los meses del préstamo y cada cuota debe ser razonable
+    if (!campos.num_cuotas && !campos.fecha_primera_cuota && !campos.fecha_vencimiento_total) {
+      const fmt = (f) => f.split('-').reverse().join('/'); const k = cuotasQueCaben(primera, total);
+      if (n !== k) campos.num_cuotas = `No es coherente: con 1 cuota por mes, entre ${fmt(primera)} y ${fmt(total)} corresponden ${k} ${k === 1 ? 'cuota' : 'cuotas'}, no ${n}. Ajusta las cuotas o la fecha de vencimiento`;
+      else if (!campos.monto_total && monto / n < CUOTA_MINIMA) campos.num_cuotas = `Con ${n} ${n === 1 ? 'cuota' : 'cuotas'} cada una sería de S/ ${(monto / n).toFixed(2)}; la cuota mínima es S/ ${CUOTA_MINIMA.toFixed(2)}. Reduce el plazo o aumenta el monto`;
     }
+    if (!Object.keys(campos).length) cuotas = repartirCuotas(monto, n, primera);
     prestamo = { monto_total: monto, num_cuotas: n, mora_tna: mora, fecha_vencimiento_total: total, fecha_primera_cuota: primera };
     Object.assign(fila, { concepto: 'Préstamo' });
   }
