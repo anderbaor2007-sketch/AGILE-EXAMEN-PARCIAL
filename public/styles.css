@@ -105,8 +105,6 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 
 @media (max-width: 760px) {
   .barra { padding: 10px 14px; } .usuario { display: none; }
-  table, thead, tbody, tr, td { display: block; } thead { display: none; }
-  tr { padding: 12px 14px; border-top: 1px solid var(--borde); } td { border: 0; padding: 4px 0; } td.monto, .der { text-align: left; }
   .login-tarjeta { padding: 60px 22px 26px; }
 }
 
@@ -196,11 +194,6 @@ textarea { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; bor
 .dash-main .tarjeta.tabla-tarjeta { margin-top: 18px; }
 .tarj-t { display: flex; justify-content: space-between; align-items: baseline; padding: 16px 20px 6px; } .tarj-t h3 { margin: 0; } .tarj-t small { color: var(--gris); }
 @media (max-width: 1000px) { .g-fila, .g-fila2 { grid-template-columns: 1fr; } .g-bloques { flex-direction: row; flex-wrap: wrap; } .bloque { min-width: 140px; } }
-@media (max-width: 760px) {
-  .dash { flex-direction: column; } .lateral { width: 100%; height: auto; position: static; flex-direction: row; flex-wrap: wrap; padding: 10px; align-items: center; }
-  .lateral-marca { padding: 0 8px; } .lateral-nav { flex-direction: row; flex-wrap: wrap; } .lateral-nav a, .lateral-salir { padding: 8px 10px; font-size: .8rem; }
-  .dash-main { padding: 16px; } .cal-dia { min-height: 60px; } .cal-pago { font-size: .6rem; }
-}
 
 td.cod { font-family: ui-monospace, Consolas, monospace; font-size: .8rem; font-weight: 700; color: var(--navy-2); white-space: nowrap; }
 .evid-com { color: var(--gris); font-size: .85rem; margin: -4px 0 8px; }
@@ -343,3 +336,95 @@ dialog[open]::backdrop { animation: fundir .3s ease; background: rgba(6, 40, 29,
 .btn-x:hover { background: #fee2e2; transform: scale(1.12); }
 .lista-arch li.total { background: #fff; }
 input[type=file]:disabled { opacity: .55; cursor: not-allowed; }
+
+
+/* ================= Adaptable: celular, tablet y PC ================= */
+/* Tablas: barra de desplazamiento horizontal cuando no caben */
+.tabla-tarjeta { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+.tabla-tarjeta > table { min-width: 640px; }
+.tabla-tarjeta > .vacio { min-width: 0; position: sticky; left: 0; }
+th { white-space: nowrap; }
+.cuotas-tabla { min-width: 520px; }
+.tabla-tarjeta, .cuotas-scroll, #m-vista-cal { scrollbar-width: thin; scrollbar-color: #8fc4a9 #e8f2ec; }
+.tabla-tarjeta::-webkit-scrollbar, .cuotas-scroll::-webkit-scrollbar, #m-vista-cal::-webkit-scrollbar { height: 10px; width: 10px; }
+.tabla-tarjeta::-webkit-scrollbar-track, .cuotas-scroll::-webkit-scrollbar-track, #m-vista-cal::-webkit-scrollbar-track { background: #e8f2ec; border-radius: 99px; }
+.tabla-tarjeta::-webkit-scrollbar-thumb, .cuotas-scroll::-webkit-scrollbar-thumb, #m-vista-cal::-webkit-scrollbar-thumb { background: #8fc4a9; border-radius: 99px; }
+.tabla-tarjeta::-webkit-scrollbar-thumb:hover { background: var(--azul); }
+.tarj-t { flex-wrap: wrap; gap: 4px 14px; position: sticky; left: 0; }
+img, svg, iframe { max-width: 100%; }
+
+/* Botón de menú y velo (solo en pantallas chicas) */
+.btn-menu { display: none; font: inherit; font-size: 1.3rem; line-height: 1; width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--borde); background: #fff; color: var(--navy); cursor: pointer; box-shadow: var(--sombra); }
+.velo { display: none; }
+.dash-top > div:first-of-type { min-width: 0; }
+.dash-top-izq { display: flex; align-items: center; gap: 12px; min-width: 0; }
+
+/* Tablet y portátil pequeño: menú lateral más angosto */
+@media (max-width: 1100px) {
+  .lateral { width: 200px; padding: 20px 10px; }
+  .lateral-nav a, .lateral-salir { padding: 11px 10px; font-size: .88rem; }
+  .dash-main { padding: 20px 20px 60px; }
+}
+
+/* Tablet vertical y celular: el menú lateral pasa a ser un menú que se abre con ☰ */
+@media (max-width: 900px) {
+  .btn-menu { display: inline-grid; place-items: center; flex: none; }
+  .lateral { position: fixed; left: 0; top: 0; bottom: 0; width: 260px; max-width: 82vw; height: 100%; z-index: 40; transform: translateX(-105%); transition: transform .28s var(--ease, ease); overflow-y: auto; padding: 22px 14px; box-shadow: none; }
+  .menu-abierto .lateral { transform: none; box-shadow: 8px 0 40px rgba(0, 0, 0, .35); }
+  .velo { display: block; position: fixed; inset: 0; background: rgba(6, 40, 29, .5); backdrop-filter: blur(2px); z-index: 30; opacity: 0; pointer-events: none; transition: opacity .25s; }
+  .menu-abierto .velo { opacity: 1; pointer-events: auto; }
+  .dash { display: block; }
+  .dash-main { padding: 16px 16px 60px; }
+  .dash-top { flex-wrap: nowrap; }
+  .dash-top h1 { font-size: 1.35rem; }
+  .dash-user { display: none; }
+  .g-fila, .g-fila2 { grid-template-columns: 1fr; }
+}
+
+/* Celular */
+@media (max-width: 600px) {
+  .dash-top { flex-wrap: wrap; }
+  .dash-top-izq { width: 100%; }
+  .dash-top-der { width: 100%; justify-content: space-between; }
+  .dash-top h1 { font-size: 1.2rem; }
+  .g-kpis, .resumen { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .g-kpi, .kpi { padding: 14px; gap: 10px; flex-direction: column; align-items: flex-start; }
+  .g-kpi b, .kpi b { font-size: 1.15rem; }
+  .g-kpi-ic, .kpi-icono { width: 40px; height: 40px; }
+  .progreso { grid-column: 1 / -1; }
+  .contenedor { padding: 18px 12px 60px; }
+  .barra { padding: 10px 12px; }
+  .marca small { display: none; }
+  .titulo { font-size: 1.3rem; }
+  .titulo-fila { gap: 12px; }
+  .acciones-titulo { width: 100%; gap: 10px; }
+  .acciones-titulo .btn-primario { width: 100%; }
+  .conmutar { flex: 1; } .conmutar button { flex: 1; }
+  .selector-mes { width: 100%; justify-content: space-between; } .selector-mes h3 { min-width: 0; flex: 1; }
+  .tabs { overflow-x: auto; white-space: nowrap; scrollbar-width: none; } .tabs::-webkit-scrollbar { display: none; }
+  .tab { padding: 10px 14px; }
+  .tabla-tarjeta > table { min-width: 560px; }
+  th, td { padding: 11px 12px; }
+  .dos-col { grid-template-columns: 1fr; }
+  .form-grid { grid-template-columns: 1fr; }
+  .datos { grid-template-columns: 1fr; gap: 2px; } .datos dd { margin-bottom: 8px; }
+  dialog { padding: 20px 16px; min-width: 0; width: 94vw; max-height: 92vh; overflow-y: auto; }
+  dialog.ancho { width: 94vw; }
+  dialog menu { flex-wrap: wrap; } dialog menu .btn { flex: 1 1 auto; }
+  .toast { left: 12px; right: 12px; bottom: 12px; max-width: none; text-align: center; }
+  #m-vista-cal { overflow-x: auto; padding: 12px; } #m-vista-cal .cal { min-width: 520px; }
+  .hbar { grid-template-columns: 70px 1fr auto; }
+  .login { padding: 14px; }
+}
+
+/* Celulares muy angostos */
+@media (max-width: 380px) {
+  .g-kpis, .resumen { grid-template-columns: 1fr; }
+  .tabla-tarjeta > table { min-width: 520px; }
+}
+
+/* Pantallas grandes */
+@media (min-width: 1500px) {
+  .contenedor { max-width: 1280px; }
+  .dash-main { padding: 26px 40px 70px; }
+}

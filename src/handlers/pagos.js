@@ -240,7 +240,10 @@ async function validarNuevo(body) {
     const imp = t('concepto_impuesto');
     if (!imp) campos.concepto_impuesto = 'Selecciona el impuesto';
     else if (IMPUESTOS[ent] && !IMPUESTOS[ent].includes(imp)) campos.concepto_impuesto = `Con ${ent} solo se puede pagar: ${IMPUESTOS[ent].join(' o ')}`;
-    Object.assign(fila, { concepto: imp, entidad: ent });
+    const recI = t('numero_recibo');
+    if (!recI) campos.numero_recibo = 'Ingresa el número de recibo';
+    else if (recI.length > 30 || !SOLO_ALFANUM.test(recI)) campos.numero_recibo = 'El número de recibo solo puede tener letras, números y guiones';
+    Object.assign(fila, { concepto: imp, entidad: ent, numero_recibo: recI });
     monto = validarMonto(body.monto, cat, 'monto', campos); vencimiento = t('fecha_vencimiento'); validarVencimiento(vencimiento, 'fecha_vencimiento', campos, atrasado);
 
   } else {   // Préstamos

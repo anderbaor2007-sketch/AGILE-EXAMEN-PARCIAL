@@ -43,7 +43,8 @@
 
   <!-- ============ GERENTE: panel de monitoreo (HU-02) ============ -->
   <div id="vista-gerente" class="dash" hidden>
-    <aside class="lateral">
+    <div id="g-velo" class="velo"></div>
+    <aside class="lateral" id="g-lateral">
       <div class="lateral-marca"><img class="logo-mini" src="logo-icono.png" alt="Logo Castillo" width="44" height="44"><div><b>Castillo</b><small>Egresos</small></div></div>
       <nav class="lateral-nav">
         <a href="#g-resumen" class="activo"><span>▦</span> Panel</a>
@@ -57,7 +58,7 @@
     </aside>
     <div class="dash-main">
       <header class="dash-top">
-        <div><h1>Panel de monitoreo</h1><p id="g-sub" class="subtitulo"></p></div>
+        <div class="dash-top-izq"><button id="g-menu" class="btn-menu" type="button" aria-label="Abrir menú" aria-expanded="false">☰</button><div><h1>Panel de monitoreo</h1><p id="g-sub" class="subtitulo"></p></div></div>
         <div class="dash-top-der">
           <button id="g-actualizar" class="btn btn-claro">⟳ Actualizar</button>
           <div class="avatar" id="g-avatar">G</div><div class="dash-user"><b id="g-usuario"></b><small>Gerente</small></div>
@@ -181,6 +182,7 @@
       <div class="cat-form" id="f-Impuestos" hidden>
         <label>Entidad <select id="n-ent-imp"><option value="">Selecciona…</option><option>SUNAT</option><option>SAT</option></select><span class="campo-error" data-err="entidad"></span></label>
         <label>Impuesto <select id="n-imp"><option value="">Primero elige la entidad</option></select><span class="campo-error" data-err="concepto_impuesto"></span></label>
+        <label>Número de recibo <input id="n-recibo-imp" maxlength="30" autocomplete="off"><span class="campo-error" data-err="numero_recibo"></span></label>
       </div>
 
       <!-- Monto y vencimiento (Servicios, Proveedores e Impuestos) -->
