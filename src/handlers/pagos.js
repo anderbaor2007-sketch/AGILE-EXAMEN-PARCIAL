@@ -1,5 +1,6 @@
 // Lógica de negocio. Cada función (async) recibe (ctx) y devuelve { status, json } o { status, buffer, tipo, nombre, descargar }.
 // Trazabilidad: los comentarios HU-xx indican qué historia de usuario cumple cada bloque.
+const crypto = require('crypto');
 const { query } = require('../db');
 
 // ---- Reglas de negocio (un solo lugar para ajustarlas) ----
@@ -48,6 +49,7 @@ const SELECT = `
   SELECT p.id, 'PAG-' || lpad(p.id::text, 4, '0') AS codigo, p.concepto, p.entidad, p.categoria_id, p.monto::float8 AS monto, p.fecha_vencimiento, p.estado, p.fecha_pago, p.hora_pago, p.comentario,
          p.tipo_servicio, p.numero_recibo, p.codigo_suministro, p.ruc, p.razon_social, p.prestamo_id, p.numero_cuota, p.total_cuotas,
          p.metodo_pago, p.metodo_detalle, p.mora_pagada::float8 AS mora_pagada, pr.mora_tna::float8 AS mora_tna,
+         p.congelado, p.motivo_congelado, to_char(p.congelado_en AT TIME ZONE 'America/Lima', 'DD/MM/YYYY HH24:MI') AS congelado_en,
          c.nombre AS categoria, e.nombre_original AS evidencia_nombre, e.tipo_mime AS evidencia_tipo, (e.id IS NOT NULL) AS tiene_evidencia,
          (SELECT count(*)::int FROM evidencias x WHERE x.pago_id = p.id AND NOT x.vigente) AS intentos_usados
   FROM pagos p JOIN categorias c ON c.id = p.categoria_id LEFT JOIN prestamos pr ON pr.id = p.prestamo_id LEFT JOIN evidencias e ON e.pago_id = p.id AND e.vigente`;
@@ -68,14 +70,20 @@ function detalleDe(p) {
 }
 
 // Un pago Pendiente con vencimiento anterior a hoy está ATRASADO; dentro de los próximos 3 días, POR_VENCER.
+// Un pago CONGELADO por el gerente no se marca como atrasado ni por vencer y no genera mora mientras siga congelado.
+// estado_visible (lo que ve el usuario): PENDIENTE, PAGADO, ATRASADO o CONGELADO.
 function conAlerta(p) {
   const h = hoy(); let alerta = null; let dias = null; let mora = p.estado === 'PAGADO' ? (p.mora_pagada || 0) : 0;
+  const congelado = p.estado === 'PENDIENTE' && !!p.congelado;
   if (p.estado === 'PENDIENTE') {
     dias = diasEntre(h, p.fecha_vencimiento); // >0 faltan, 0 vence hoy, <0 atraso
-    if (dias < 0) { alerta = 'ATRASADO'; mora = calcMora(p.monto, p.mora_tna || 0, -dias); }
-    else if (dias <= DIAS_POR_VENCER) alerta = 'POR_VENCER';
+    if (!congelado) {
+      if (dias < 0) { alerta = 'ATRASADO'; mora = calcMora(p.monto, p.mora_tna || 0, -dias); }
+      else if (dias <= DIAS_POR_VENCER) alerta = 'POR_VENCER';
+    }
   }
-  return { ...p, tiene_evidencia: !!p.tiene_evidencia, alerta, dias, intentos_restantes: Math.max(0, MAX_CAMBIOS_EVIDENCIA - (p.intentos_usados || 0)),
+  const estado_visible = p.estado === 'PAGADO' ? 'PAGADO' : congelado ? 'CONGELADO' : alerta === 'ATRASADO' ? 'ATRASADO' : 'PENDIENTE';
+  return { ...p, congelado, estado_visible, tiene_evidencia: !!p.tiene_evidencia, alerta, dias, intentos_restantes: Math.max(0, MAX_CAMBIOS_EVIDENCIA - (p.intentos_usados || 0)),
     mora, total: redondeo(p.monto + mora), metodo_texto: metodoTexto(p.metodo_pago, p.metodo_detalle), detalle: detalleDe(p) };
 }
 const suma = (l) => redondeo(l.reduce((s, p) => s + p.total, 0));      // incluye la mora
@@ -112,14 +120,16 @@ async function panel() {
 
   const clave = (p) => `${p.fecha_pago} ${p.hora_pago || '00:00'}`;
   const pagados = filas.filter((p) => p.estado === 'PAGADO').sort((a, b) => clave(b).localeCompare(clave(a)));   // más reciente primero
-  const pendientes = filas.filter((p) => p.estado === 'PENDIENTE');                                             // ya vienen por vencimiento
+  const pendientes = filas.filter((p) => p.estado === 'PENDIENTE');                                             // ya vienen por vencimiento (incluye congelados)
+  const congelados = pendientes.filter((p) => p.congelado);
   const atrasados = pendientes.filter((p) => p.alerta === 'ATRASADO');
-  const enPlazo = pendientes.filter((p) => p.alerta !== 'ATRASADO');
+  const enPlazo = pendientes.filter((p) => !p.congelado && p.alerta !== 'ATRASADO');
   const hoyLista = filas.filter((p) => p.fecha_vencimiento === h);
   const resumen = {
     pagados: { n: pagados.length, monto: suma(pagados) },
     pendientes: { n: enPlazo.length, monto: suma(enPlazo) },
     atrasados: { n: atrasados.length, monto: suma(atrasados) },
+    congelados: { n: congelados.length, monto: suma(congelados) },
   };
   // «Cambios de evidencia»: archivos reemplazados (intentos previos), el más reciente primero
   const cambios = await query(`
@@ -132,7 +142,7 @@ async function panel() {
 // ---------- HU-08: pagos por vencer (asistente) ----------
 async function porVencer() {
   const limite = sumaDias(hoy(), DIAS_POR_VENCER);
-  const pagos = (await query(`${SELECT} WHERE p.estado = 'PENDIENTE' AND p.fecha_vencimiento <= $1
+  const pagos = (await query(`${SELECT} WHERE p.estado = 'PENDIENTE' AND NOT p.congelado AND p.fecha_vencimiento <= $1
     ORDER BY p.fecha_vencimiento, p.id`, [limite])).map(conAlerta);
   return { status: 200, json: { hoy: hoy(), dias_por_vencer: DIAS_POR_VENCER, pagos } };
 }
@@ -161,10 +171,14 @@ function validarMonto(txt, cat, campo, campos) {
 }
 // Cuántas cuotas mensuales caben entre la primera cuota y el vencimiento del préstamo (1 cuota = 1 mes)
 const cuotasQueCaben = (primera, total) => { let n = 1; while (sumaMeses(primera, n) <= total) n++; return n; };
-function validarVencimiento(f, campo, campos) {
+function validarVencimiento(f, campo, campos, atrasado = false) {
   if (!f) campos[campo] = 'Ingresa la fecha de vencimiento';
   else if (!esFecha(f)) campos[campo] = 'La fecha de vencimiento no es válida';
-  else if (f < hoy()) campos[campo] = 'La fecha de vencimiento no puede ser anterior a hoy';   // hoy sí: vence al terminar el día (00:00 del día siguiente)
+  else if (atrasado) {   // pago atrasado: ya venció, así que la fecha debe ser anterior a hoy (y no más de 1 año atrás)
+    if (f >= hoy()) campos[campo] = 'Un pago atrasado debe tener una fecha de vencimiento anterior a hoy';
+    else if (f < sumaMeses(hoy(), -12)) campos[campo] = 'El vencimiento no puede ser anterior a 1 año desde hoy';
+  }
+  else if (f < hoy()) campos[campo] = 'La fecha de vencimiento no puede ser anterior a hoy. Si el pago ya venció, márcalo como «Pago atrasado»';   // hoy sí: vence al terminar el día (00:00 del día siguiente)
   else if (f > sumaAnio(hoy())) campos[campo] = 'El vencimiento no puede ser mayor a 1 año desde hoy';
 }
 // Reparte el total en cuotas iguales (en céntimos); la última absorbe la diferencia
@@ -182,6 +196,7 @@ async function validarNuevo(body) {
   if (!cat) return { e: err(400, 'Corrige los campos indicados', campos) };
 
   const t = (k) => String(body[k] ?? '').trim();
+  const atrasado = body.atrasado === true || body.atrasado === 'true';   // solo para pagos que no son préstamos
   const fila = { concepto: '', entidad: '', tipo_servicio: null, numero_recibo: null, codigo_suministro: null, ruc: null, razon_social: null };
   let monto = 0; let vencimiento = null; let prestamo = null; let cuotas = null;
 
@@ -200,7 +215,7 @@ async function validarNuevo(body) {
       else fila.codigo_suministro = cod;
     }
     Object.assign(fila, { concepto: tipo, tipo_servicio: tipo, numero_recibo: rec });
-    monto = validarMonto(body.monto, cat, 'monto', campos); vencimiento = t('fecha_vencimiento'); validarVencimiento(vencimiento, 'fecha_vencimiento', campos);
+    monto = validarMonto(body.monto, cat, 'monto', campos); vencimiento = t('fecha_vencimiento'); validarVencimiento(vencimiento, 'fecha_vencimiento', campos, atrasado);
 
   } else if (cat.nombre === 'Proveedores') {
     const ruc = t('ruc');
@@ -211,7 +226,7 @@ async function validarNuevo(body) {
     if (!rs) campos.razon_social = 'Ingresa la razón social';
     else if (rs.length < 2 || rs.length > 100 || !RAZON_SOCIAL.test(rs)) campos.razon_social = 'La razón social no es válida (letras, números, espacios y . , & - \')';
     Object.assign(fila, { concepto: 'Pago a proveedor', entidad: rs, ruc, razon_social: rs });
-    monto = validarMonto(body.monto, cat, 'monto', campos); vencimiento = t('fecha_vencimiento'); validarVencimiento(vencimiento, 'fecha_vencimiento', campos);
+    monto = validarMonto(body.monto, cat, 'monto', campos); vencimiento = t('fecha_vencimiento'); validarVencimiento(vencimiento, 'fecha_vencimiento', campos, atrasado);
 
   } else if (cat.nombre === 'Impuestos') {
     const ent = t('entidad');
@@ -221,7 +236,7 @@ async function validarNuevo(body) {
     if (!imp) campos.concepto_impuesto = 'Selecciona el impuesto';
     else if (IMPUESTOS[ent] && !IMPUESTOS[ent].includes(imp)) campos.concepto_impuesto = `Con ${ent} solo se puede pagar: ${IMPUESTOS[ent].join(' o ')}`;
     Object.assign(fila, { concepto: imp, entidad: ent });
-    monto = validarMonto(body.monto, cat, 'monto', campos); vencimiento = t('fecha_vencimiento'); validarVencimiento(vencimiento, 'fecha_vencimiento', campos);
+    monto = validarMonto(body.monto, cat, 'monto', campos); vencimiento = t('fecha_vencimiento'); validarVencimiento(vencimiento, 'fecha_vencimiento', campos, atrasado);
 
   } else {   // Préstamos
     fila.entidad = validarEntidad(body, campos);
@@ -306,16 +321,26 @@ function validarArchivo(buf, headers) {
   if (!tipo) return { e: err(400, `El archivo tiene un formato no admitido. ${FORMATOS}`, { archivo: FORMATOS }) };
   let nombre = 'evidencia' + tipo[1];
   try { nombre = decodeURIComponent(headers['x-nombre'] || '').slice(0, 120) || nombre; } catch { /* nombre por defecto */ }
-  return { tipo, nombre };
+  return { tipo, nombre, hash: crypto.createHash('sha256').update(buf).digest('hex') };
+}
+// Un mismo archivo (mismos bytes) no puede usarse como evidencia dos veces: ni en otro pago ni en otro intento del mismo pago.
+async function archivoRepetido(hash, pagoId) {
+  const [d] = await query(`SELECT pago_id, vigente, 'PAG-' || lpad(pago_id::text, 4, '0') AS codigo FROM evidencias WHERE hash = $1 ORDER BY (pago_id = $2) DESC LIMIT 1`, [hash, pagoId]);
+  if (!d) return null;
+  const msg = d.pago_id === pagoId
+    ? (d.vigente ? 'Este archivo es igual a la evidencia vigente de este pago. Sube un archivo distinto.' : 'Este archivo es igual a un intento anterior de este pago. Sube un archivo distinto.')
+    : `Este archivo ya fue usado como evidencia del pago ${d.codigo}. Cada pago debe tener su propia evidencia.`;
+  return err(409, msg, { archivo: msg });
 }
 
 // ---------- HU-06: registrar pago como realizado (fecha + hora + comentario + evidencia en UNA operación) ----------
 // PUT /api/pagos/:id/pagar — cuerpo: el archivo; cabeceras: X-Fecha-Pago, X-Hora-Pago, X-Comentario, X-Nombre
 async function pagar({ params, bodyCrudo, headers, usuario }) {
-  const [p] = await query(`SELECT p.id, p.estado, p.concepto, p.monto::float8 AS monto, p.fecha_vencimiento, c.nombre AS categoria, pr.mora_tna::float8 AS mora_tna
+  const [p] = await query(`SELECT p.id, p.estado, p.congelado, p.concepto, p.monto::float8 AS monto, p.fecha_vencimiento, c.nombre AS categoria, pr.mora_tna::float8 AS mora_tna
     FROM pagos p JOIN categorias c ON c.id = p.categoria_id LEFT JOIN prestamos pr ON pr.id = p.prestamo_id WHERE p.id = $1`, [params.id]);
   if (!p) return err(404, 'Pago no encontrado');
   if (p.estado !== 'PENDIENTE') return err(409, 'Solo se puede registrar como realizado un pago Pendiente.');
+  if (p.congelado) return err(409, 'Este pago está congelado por el gerente. No se puede registrar como realizado hasta que lo descongele.');
 
   const fecha = headers['x-fecha-pago']; const hora = headers['x-hora-pago'];
   let comentario = null;
@@ -334,17 +359,18 @@ async function pagar({ params, bodyCrudo, headers, usuario }) {
   if (permitidos[metodo].length && !permitidos[metodo].includes(detalle)) return err(400, 'Completa el método de pago.', { metodo_detalle: metodo === 'BILLETERA' ? 'Selecciona Plin, Yape o Agora' : 'Selecciona crédito o débito' });
   if (!permitidos[metodo].length && detalle) return err(400, 'Método de pago inválido.', { metodo_pago: 'Método de pago inválido' });
   const v = validarArchivo(bodyCrudo, headers); if (v.e) return v.e;
+  const rep = await archivoRepetido(v.hash, p.id); if (rep) return rep;
   const mora = calcMora(p.monto, p.mora_tna || 0, diasEntre(p.fecha_vencimiento, fecha));   // mora hasta la fecha de pago (solo préstamos atrasados)
 
   // Un solo comando SQL = operación atómica: o pasa a PAGADO con su evidencia, o no pasa nada.
   const r = await query(`
     WITH u AS (
       UPDATE pagos SET estado='PAGADO', fecha_pago=$2, hora_pago=$3, comentario=$4, pagado_por=$5, metodo_pago=$9, metodo_detalle=$10, mora_pagada=$11
-      WHERE id=$1 AND estado='PENDIENTE' RETURNING id
+      WHERE id=$1 AND estado='PENDIENTE' AND NOT congelado AND NOT EXISTS (SELECT 1 FROM evidencias WHERE hash=$12) RETURNING id
     )
-    INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, comentario)
-    SELECT id, $6, $7, $8, $5, $4 FROM u RETURNING pago_id`,
-    [p.id, fecha, hora, comentario, usuario.id, bodyCrudo, v.nombre, v.tipo[0], metodo, detalle, mora]);
+    INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, comentario, hash)
+    SELECT id, $6, $7, $8, $5, $4, $12 FROM u RETURNING pago_id`,
+    [p.id, fecha, hora, comentario, usuario.id, bodyCrudo, v.nombre, v.tipo[0], metodo, detalle, mora, v.hash]);
   if (!r.length) return err(409, 'Solo se puede registrar como realizado un pago Pendiente.');
   return { status: 200, json: { ok: true, concepto: p.concepto, fecha_pago: fecha, hora_pago: hora, archivo: v.nombre, metodo_texto: metodoTexto(metodo, detalle), mora, total: redondeo(p.monto + mora) } };
 }
@@ -360,13 +386,14 @@ async function cambiarEvidencia({ params, bodyCrudo, headers, usuario }) {
   try { comentario = decodeURIComponent(headers['x-comentario'] || '').trim() || null; } catch { comentario = null; }
   if (comentario && comentario.length > 300) return err(400, 'El comentario no puede superar 300 caracteres.', { comentario: 'Máximo 300 caracteres' });
   const v = validarArchivo(bodyCrudo, headers); if (v.e) return v.e;
+  const rep = await archivoRepetido(v.hash, p.id); if (rep) return rep;
 
   const [{ vig }] = await query('SELECT count(*)::int AS vig FROM evidencias WHERE pago_id = $1 AND vigente', [p.id]);
   let r;
   if (!vig) {
     // Pago Pagado que (por datos antiguos) no tiene archivo vigente: el nuevo pasa a ser la evidencia vigente, sin gastar un intento.
-    r = await query('INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, vigente, comentario) VALUES ($1,$2,$3,$4,$5,true,$6) RETURNING pago_id',
-      [p.id, bodyCrudo, v.nombre, v.tipo[0], usuario.id, comentario]);
+    r = await query('INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, vigente, comentario, hash) VALUES ($1,$2,$3,$4,$5,true,$6,$7) RETURNING pago_id',
+      [p.id, bodyCrudo, v.nombre, v.tipo[0], usuario.id, comentario, v.hash]);
     if (r.length) return { status: 200, json: { ok: true, intentos_restantes: MAX_CAMBIOS_EVIDENCIA - usados, sin_vigente: true } };
   }
   // Un solo comando: archiva la vigente (con su número de intento y hora) y deja la nueva como vigente.
@@ -374,13 +401,37 @@ async function cambiarEvidencia({ params, bodyCrudo, headers, usuario }) {
     WITH u AS (
       UPDATE evidencias SET vigente = false, numero_intento = (SELECT count(*) FROM evidencias WHERE pago_id = $1 AND NOT vigente) + 1, reemplazada_en = now()
       WHERE pago_id = $1 AND vigente AND (SELECT count(*) FROM evidencias WHERE pago_id = $1 AND NOT vigente) < ${MAX_CAMBIOS_EVIDENCIA}
+        AND NOT EXISTS (SELECT 1 FROM evidencias WHERE hash = $7)
       RETURNING pago_id
     )
-    INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, vigente, comentario)
-    SELECT pago_id, $2, $3, $4, $5, true, $6 FROM u RETURNING pago_id`,
-    [p.id, bodyCrudo, v.nombre, v.tipo[0], usuario.id, comentario]);
+    INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, vigente, comentario, hash)
+    SELECT pago_id, $2, $3, $4, $5, true, $6, $7 FROM u RETURNING pago_id`,
+    [p.id, bodyCrudo, v.nombre, v.tipo[0], usuario.id, comentario, v.hash]);
   if (!r.length) return err(409, 'No fue posible cambiar la evidencia de este pago.');
   return { status: 200, json: { ok: true, intentos_restantes: MAX_CAMBIOS_EVIDENCIA - (usados + 1) } };
+}
+
+// ---------- Congelar / descongelar un pago (solo gerente) ----------
+// Un pago congelado no se puede registrar como realizado y no genera mora; se muestra con el estado «Congelado».
+// POST /api/pagos/:id/congelar  { motivo? }   ·   POST /api/pagos/:id/descongelar
+async function congelar({ params, body }) {
+  const [p] = await query('SELECT id, estado, congelado, concepto FROM pagos WHERE id = $1', [params.id]);
+  if (!p) return err(404, 'Pago no encontrado');
+  if (p.estado === 'PAGADO') return err(409, 'Un pago que ya está Pagado no se puede congelar.');
+  if (p.congelado) return err(409, 'Este pago ya está congelado.');
+  const motivo = String(body.motivo ?? '').trim();
+  if (motivo.length > 200) return err(400, 'El motivo no puede superar 200 caracteres.', { motivo: 'Máximo 200 caracteres' });
+  const r = await query(`UPDATE pagos SET congelado = true, congelado_en = now(), motivo_congelado = $2 WHERE id = $1 AND estado = 'PENDIENTE' AND NOT congelado RETURNING id`, [p.id, motivo || null]);
+  if (!r.length) return err(409, 'No fue posible congelar el pago.');
+  return { status: 200, json: { ok: true, concepto: p.concepto } };
+}
+async function descongelar({ params }) {
+  const [p] = await query('SELECT id, estado, congelado, concepto FROM pagos WHERE id = $1', [params.id]);
+  if (!p) return err(404, 'Pago no encontrado');
+  if (!p.congelado) return err(409, 'Este pago no está congelado.');
+  const r = await query('UPDATE pagos SET congelado = false, congelado_en = NULL, motivo_congelado = NULL WHERE id = $1 AND congelado RETURNING id', [p.id]);
+  if (!r.length) return err(409, 'No fue posible descongelar el pago.');
+  return { status: 200, json: { ok: true, concepto: p.concepto } };
 }
 
 // ---------- Ver detalles: todos los datos de un pago (y, si es un préstamo, todas sus cuotas) ----------
@@ -397,7 +448,7 @@ async function detalle({ params }) {
       FROM prestamos WHERE id = $1`, [p.prestamo_id]);
     const filas = (await query(`${SELECT} WHERE p.prestamo_id = $1 ORDER BY p.numero_cuota`, [p.prestamo_id])).map(conAlerta);
     cuotas = filas.map((c) => ({ id: c.id, codigo: c.codigo, numero_cuota: c.numero_cuota, fecha_vencimiento: c.fecha_vencimiento, monto: c.monto, mora: c.mora, total: c.total,
-      estado: c.estado, alerta: c.alerta, dias: c.dias, fecha_pago: c.fecha_pago, hora_pago: c.hora_pago, metodo_texto: c.metodo_texto, actual: c.id === p.id }));
+      estado: c.estado, estado_visible: c.estado_visible, congelado: c.congelado, alerta: c.alerta, dias: c.dias, fecha_pago: c.fecha_pago, hora_pago: c.hora_pago, metodo_texto: c.metodo_texto, actual: c.id === p.id }));
     const pagadas = filas.filter((c) => c.estado === 'PAGADO');
     prestamo.resumen = { pagadas: pagadas.length, pendientes: filas.length - pagadas.length, atrasadas: filas.filter((c) => c.alerta === 'ATRASADO').length,
       total_pagado: suma(pagadas), saldo: suma(filas.filter((c) => c.estado !== 'PAGADO')) };
@@ -426,4 +477,4 @@ async function verArchivo({ params, query: qs }) {
   return { status: 200, buffer: e.datos, tipo: e.tipo_mime, nombre: e.nombre_original, descargar: qs.get('descargar') === '1' };
 }
 
-module.exports = { detalle, listar, panel, porVencer, categorias, verificar, crear, pagar, cambiarEvidencia, infoEvidencias, verArchivo, MAX_BYTES };
+module.exports = { congelar, descongelar, detalle, listar, panel, porVencer, categorias, verificar, crear, pagar, cambiarEvidencia, infoEvidencias, verArchivo, MAX_BYTES };

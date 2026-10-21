@@ -41,6 +41,16 @@ function toast(texto) { const t = $('toast'); t.textContent = '✅ ' + texto; t.
 const limpiarErrores = (raiz) => raiz.querySelectorAll('.campo-error').forEach((e) => (e.textContent = ''));
 const celdaMonto = (p) => soles(p.total ?? p.monto) + (p.mora > 0 ? `<span class="mora">incl. mora ${soles(p.mora)}</span>` : '');
 const detalleHtml = (p) => (p.detalle || []).map(([k, v]) => [k, esc(v)]);
+const cuenta = (n) => `<span class="cuenta" data-valor="${Number(n)}">${soles(n)}</span>`;   // monto que «sube» desde 0 al abrirse (animarContadores)
+const sinMovimiento = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+function animarContadores(raiz = document) {
+  raiz.querySelectorAll('.cuenta[data-valor]').forEach((el) => {
+    const fin = Number(el.dataset.valor); if (sinMovimiento || !Number.isFinite(fin)) return;
+    const ms = Math.min(1100, 500 + Math.log10(Math.abs(fin) + 10) * 120); const t0 = performance.now(); el.textContent = soles(0);
+    const paso = (t) => { const k = Math.min(1, (t - t0) / ms); el.textContent = soles(k < 1 ? fin * (1 - Math.pow(1 - k, 3)) : fin); if (k < 1) requestAnimationFrame(paso); };
+    requestAnimationFrame(paso);
+  });
+}
 const dl = (pares) => pares.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
 document.querySelectorAll('[data-cerrar]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); b.closest('dialog').close(); }));
 $('msg-ok').onclick = () => $('dlg-msg').close();
@@ -110,10 +120,22 @@ $('btn-salir').onclick = cerrarSesion; $('g-salir').onclick = cerrarSesion;
 // GERENTE — HU-02 panel de monitoreo
 // =====================================================================
 function tarjetaKpi(clase, icono, titulo, n, monto) {
-  return `<div class="g-kpi ${clase}"><div class="g-kpi-ic">${icono}</div><div><small>${titulo}</small><b>${soles(monto)}</b><span>${n} ${n === 1 ? 'pago' : 'pagos'}</span></div></div>`;
+  return `<div class="g-kpi ${clase}"><div class="g-kpi-ic">${icono}</div><div><small>${titulo}</small><b>${cuenta(monto)}</b><span>${n} ${n === 1 ? 'pago' : 'pagos'}</span></div></div>`;
 }
-const etqSituacion = (p) => (p.alerta === 'ATRASADO' ? `<span class="etq ATRASADO">Atrasado · ${-p.dias} d</span>` : p.alerta === 'POR_VENCER' ? `<span class="etq POR_VENCER">Por vencer</span>` : '<span class="etq PENDIENTE">Pendiente</span>');
+// Estado visible de un pago: Pendiente, Pagado, Atrasado o Congelado (y, si es Pendiente y está cerca, cuántos días faltan)
+function chipEstado(p) {
+  const e = p.estado_visible || (p.estado === 'PAGADO' ? 'PAGADO' : p.alerta === 'ATRASADO' ? 'ATRASADO' : 'PENDIENTE');
+  if (e === 'PAGADO') return '<span class="etq PAGADO">Pagado</span>';
+  if (e === 'CONGELADO') return '<span class="etq CONGELADO">Congelado</span>';
+  if (e === 'ATRASADO') return `<span class="etq ATRASADO">Atrasado · ${-p.dias} ${-p.dias === 1 ? 'día' : 'días'}</span>`;
+  return '<span class="etq PENDIENTE">Pendiente</span>' + (p.alerta === 'POR_VENCER' ? ` <span class="etq POR_VENCER">${p.dias === 0 ? 'Vence hoy' : p.dias === 1 ? 'Falta 1 día' : `Faltan ${p.dias} días`}</span>` : '');
+}
+const etqSituacion = chipEstado;
+const claseFila = (p) => (p.estado_visible === 'CONGELADO' ? 'fila-congelada' : p.alerta === 'ATRASADO' ? 'fila-atrasada' : '');
+const btnCong = (p) => (p.estado === 'PENDIENTE' ? `<button class="btn btn-hielo btn-sm" data-cong="${p.id}">${p.congelado ? 'Descongelar' : '❄ Congelar'}</button>` : '');
+const motivoCong = (p) => (p.congelado && p.motivo_congelado ? `<span class="motivo">${esc(p.motivo_congelado)}</span>` : '');
 
+let panelDatos = null;
 async function cargarPanel() {
   $('g-error').hidden = true;
   let d;
@@ -124,23 +146,25 @@ async function cargarPanel() {
   $('g-sub').textContent = `${nombreMes(d.mes)} · datos al ${fmtFecha(d.hoy)} ${hh}`;
   const r = d.resumen;
   $('g-resumen').innerHTML = tarjetaKpi('solido', '✔', 'Pagados', r.pagados.n, r.pagados.monto) + tarjetaKpi('', '⏳', 'Pendientes', r.pendientes.n, r.pendientes.monto)
-    + tarjetaKpi('', '⚠', 'Atrasados', r.atrasados.n, r.atrasados.monto) + tarjetaKpi('', '◷', 'Pagos de hoy', d.hoy_lista.length, d.hoy_lista.reduce((s, p) => s + p.monto, 0));
+    + tarjetaKpi('', '⚠', 'Atrasados', r.atrasados.n, r.atrasados.monto) + tarjetaKpi('hielo', '❄', 'Congelados', r.congelados.n, r.congelados.monto) + tarjetaKpi('', '◷', 'Pagos de hoy', d.hoy_lista.length, d.hoy_lista.reduce((s, p) => s + p.monto, 0));
+  animarContadores($('g-resumen')); panelDatos = d;
   $('g-vacio').hidden = d.hay_pagos;                        // «no hay pagos registrados para este mes»
 
   // Tablas
   const tabla = (idf, idv, filas, html) => { $(idf).innerHTML = filas.map(html).join(''); $(idv).hidden = filas.length > 0; };
-  tabla('g-hoy-f', 'g-hoy-v', d.hoy_lista, (p) => `<tr><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td class="monto">${celdaMonto(p)}</td><td>${p.estado === 'PAGADO' ? '<span class="etq PAGADO">Pagado</span>' : etqSituacion(p)}</td><td>${btnVer(p.id)}</td></tr>`);
+  tabla('g-hoy-f', 'g-hoy-v', d.hoy_lista, (p) => `<tr class="${claseFila(p)}"><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td class="monto">${celdaMonto(p)}</td><td>${chipEstado(p)}${motivoCong(p)}</td><td><div class="acc-col">${btnCong(p)}${btnVer(p.id)}</div></td></tr>`);
   tabla('g-pagado-f', 'g-pagado-v', d.pagados, (p) => `<tr><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td><span class="cat">${esc(p.categoria)}</span></td><td class="monto">${celdaMonto(p)}</td><td>${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}</td><td>${esc(p.metodo_texto || '—')}</td><td><div class="acc-col"><button class="btn btn-claro btn-sm" data-evid="${p.id}">Ver evidencia</button>${btnVer(p.id)}</div></td></tr>`);
-  tabla('g-pend-f', 'g-pend-v', d.pendientes, (p) => `<tr class="${p.alerta === 'ATRASADO' ? 'fila-atrasada' : ''}"><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td class="monto">${celdaMonto(p)}</td><td>${fmtFecha(p.fecha_vencimiento)}</td><td>${etqSituacion(p)}</td><td>${btnVer(p.id)}</td></tr>`);
+  tabla('g-pend-f', 'g-pend-v', d.pendientes, (p) => `<tr class="${claseFila(p)}"><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td class="monto">${celdaMonto(p)}</td><td>${fmtFecha(p.fecha_vencimiento)}</td><td>${chipEstado(p)}${motivoCong(p)}</td><td><div class="acc-col">${btnCong(p)}${btnVer(p.id)}</div></td></tr>`);
   tabla('g-cambios-f', 'g-cambios-v', d.cambios, (c) => `<tr><td class="cod">${c.codigo}</td><td><b>${esc(c.concepto)}</b><br><small>${esc(c.entidad)}</small></td><td>Intento ${c.numero_intento}</td><td>${esc(c.fecha_hora)}</td><td><button class="btn btn-claro btn-sm" data-evid="${c.pago_id}">Ver evidencia</button></td></tr>`);
   document.querySelectorAll('[data-evid]').forEach((b) => (b.onclick = () => abrirEvidencia(b.dataset.evid)));
+  document.querySelectorAll('#vista-gerente [data-cong]').forEach((b) => (b.onclick = () => abrirCongelar([...d.hoy_lista, ...d.pendientes].find((x) => String(x.id) === b.dataset.cong))));
   document.querySelectorAll('#vista-gerente [data-ver]').forEach((b) => (b.onclick = () => abrirDetalle(b.dataset.ver)));
 }
 $('g-actualizar').onclick = async () => { const b = $('g-actualizar'); b.disabled = true; await cargarPanel(); b.disabled = false; };
 document.querySelectorAll('.lateral-nav a').forEach((a) => a.addEventListener('click', () => { document.querySelectorAll('.lateral-nav a').forEach((x) => x.classList.toggle('activo', x === a)); }));
 
 // ---------- Ver detalles de un pago (gerente y asistente) ----------
-const estadoCuota = (c) => (c.estado === 'PAGADO' ? '<span class="etq PAGADO">Pagado</span>' : c.alerta === 'ATRASADO' ? `<span class="etq ATRASADO">Atrasado · ${-c.dias} d</span>` : c.alerta === 'POR_VENCER' ? '<span class="etq POR_VENCER">Por vencer</span>' : '<span class="etq PENDIENTE">Pendiente</span>');
+const estadoCuota = chipEstado;
 async function abrirDetalle(id) {
   let d;
   try { d = await api(`/api/pagos/${id}/detalle`); }
@@ -148,24 +172,49 @@ async function abrirDetalle(id) {
   const p = d.pago; const pagado = p.estado === 'PAGADO';
   $('det-datos').innerHTML = dl([
     ['ID', p.codigo], ['Estado', estadoCuota(p)], ['Concepto', esc(p.concepto)], ['Entidad', esc(p.entidad)], ['Categoría', esc(p.categoria)], ...detalleHtml(p),
-    ['Monto', soles(p.monto)], ...(p.mora > 0 ? [[pagado ? 'Mora pagada' : 'Mora por atraso', soles(p.mora)], [pagado ? 'Total pagado' : 'Total a pagar', soles(p.total)]] : []),
+    ...(p.congelado ? [['Congelado desde', esc(p.congelado_en || '—')], ['Motivo del congelamiento', p.motivo_congelado ? esc(p.motivo_congelado) : '—']] : []),
+    ['Monto', cuenta(p.monto)], ...(p.mora > 0 ? [[pagado ? 'Mora pagada' : 'Mora por atraso', cuenta(p.mora)], [pagado ? 'Total pagado' : 'Total a pagar', cuenta(p.total)]] : []),
     ['Vencimiento', fmtFecha(p.fecha_vencimiento)], ['Registrado el', esc(p.registrado_en)],
     ...(pagado ? [['Fecha y hora de pago', `${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}`], ['Método de pago', esc(p.metodo_texto || '—')], ['Pagado por', esc(p.pagado_por_nombre || '—')],
       ['Comentario', p.comentario ? esc(p.comentario) : '—'], ['Evidencia', esc(p.evidencia_nombre || '—')], ['Cambios de evidencia', `${p.intentos_usados} de 3`]] : [])]);
   const pre = d.prestamo; $('det-prestamo').hidden = !pre;
   if (pre) {
     const r = pre.resumen;
-    $('det-pre-datos').innerHTML = dl([['Entidad bancaria', esc(pre.entidad)], ['Monto total', soles(pre.monto_total)], ['Número de cuotas', String(pre.num_cuotas)], ['Mora (TNA, base 360 días)', `${pre.mora_tna} %`],
+    $('det-pre-datos').innerHTML = dl([['Entidad bancaria', esc(pre.entidad)], ['Monto total', cuenta(pre.monto_total)], ['Número de cuotas', String(pre.num_cuotas)], ['Mora (TNA, base 360 días)', `${pre.mora_tna} %`],
       ['Primera cuota', fmtFecha(pre.fecha_primera_cuota)], ['Vence el préstamo', fmtFecha(pre.fecha_vencimiento_total)],
-      ['Avance', `${r.pagadas} pagadas · ${r.pendientes} pendientes${r.atrasadas ? ` (${r.atrasadas} atrasadas)` : ''}`], ['Total pagado', soles(r.total_pagado)], ['Saldo por pagar', soles(r.saldo)]]);
+      ['Avance', `${r.pagadas} pagadas · ${r.pendientes} pendientes${r.atrasadas ? ` (${r.atrasadas} atrasadas)` : ''}`], ['Total pagado', cuenta(r.total_pagado)], ['Saldo por pagar', cuenta(r.saldo)]]);
     $('det-cuotas').innerHTML = d.cuotas.map((c) => `<tr class="${c.actual ? 'cuota-actual' : ''}"><td>${c.numero_cuota} de ${pre.num_cuotas}${c.actual ? ' ◀' : ''}</td><td class="cod">${c.codigo}</td><td>${fmtFecha(c.fecha_vencimiento)}</td>
-      <td class="der">${soles(c.monto)}</td><td class="der">${c.mora > 0 ? soles(c.mora) : '—'}</td><td class="der">${soles(c.total)}</td><td>${estadoCuota(c)}</td><td>${c.estado === 'PAGADO' ? `${fmtFecha(c.fecha_pago)} ${esc(c.hora_pago || '')}<br><small>${esc(c.metodo_texto || '')}</small>` : '—'}</td></tr>`).join('');
+      <td class="der">${cuenta(c.monto)}</td><td class="der">${c.mora > 0 ? cuenta(c.mora) : '—'}</td><td class="der">${cuenta(c.total)}</td><td>${estadoCuota(c)}</td><td>${c.estado === 'PAGADO' ? `${fmtFecha(c.fecha_pago)} ${esc(c.hora_pago || '')}<br><small>${esc(c.metodo_texto || '')}</small>` : '—'}</td></tr>`).join('');
   }
   const ev = $('det-evid'); ev.hidden = !(usuario && usuario.rol === 'GERENTE' && pagado);
   ev.onclick = () => { $('dlg-detalle').close(); abrirEvidencia(p.id); };
-  $('dlg-detalle').showModal();
+  const cg = $('det-cong'); cg.hidden = !(usuario && usuario.rol === 'GERENTE' && p.estado === 'PENDIENTE'); cg.textContent = p.congelado ? 'Descongelar' : '❄ Congelar';
+  cg.onclick = () => abrirCongelar(p);
+  $('dlg-detalle').showModal(); animarContadores($('dlg-detalle'));
 }
 $('det-cerrar').onclick = () => $('dlg-detalle').close();
+
+// ---------- Congelar / descongelar un pago (solo gerente) ----------
+let congPago = null;
+function abrirCongelar(p) {
+  congPago = p; const des = !!p.congelado;
+  $('cong-titulo').textContent = des ? 'Descongelar pago' : 'Congelar pago';
+  $('cong-datos').innerHTML = dl([['ID', p.codigo], ['Concepto', esc(p.concepto)], ['Entidad', esc(p.entidad)], ['Categoría', esc(p.categoria)], ['Monto', cuenta(p.total ?? p.monto)], ['Vencimiento', fmtFecha(p.fecha_vencimiento)], ['Estado actual', chipEstado(p)], ...(des && p.motivo_congelado ? [['Motivo', esc(p.motivo_congelado)]] : [])]);
+  $('cong-motivo-lab').hidden = des; $('cong-motivo').value = ''; $('cong-error').textContent = '';
+  $('cong-nota').textContent = des ? 'Al descongelarlo, el pago vuelve a Pendiente (o Atrasado si ya venció) y el asistente podrá registrarlo como realizado.'
+    : 'Un pago congelado no puede registrarse como realizado, no se marca como atrasado ni genera mora, y deja de aparecer en «Por vencer» del asistente hasta que lo descongeles.';
+  $('cong-confirmar').textContent = des ? 'Descongelar pago' : 'Congelar pago';
+  if ($('dlg-detalle').open) $('dlg-detalle').close();
+  $('dlg-congelar').showModal(); animarContadores($('cong-datos'));
+}
+$('cong-confirmar').onclick = async () => {
+  const b = $('cong-confirmar'); b.disabled = true; $('cong-error').textContent = ''; const des = !!congPago.congelado;
+  try {
+    await enviarJson(`/api/pagos/${congPago.id}/${des ? 'descongelar' : 'congelar'}`, 'POST', des ? {} : { motivo: $('cong-motivo').value.trim() });
+    $('dlg-congelar').close(); toast(des ? `Pago «${congPago.concepto}» descongelado.` : `Pago «${congPago.concepto}» congelado.`); await cargarPanel();
+  } catch (e) { if (!e.sesion) $('cong-error').textContent = e.status && e.status < 500 ? e.message : 'No fue posible completar la operación. El pago conserva su estado.'; }
+  finally { b.disabled = false; }
+};
 
 // ---------- HU-03: evidencia (solo gerente) ----------
 async function abrirEvidencia(pagoId) {
@@ -173,7 +222,7 @@ async function abrirEvidencia(pagoId) {
   try { d = await api(`/api/pagos/${pagoId}/evidencias`); }
   catch (e) { if (e.sesion) return; return aviso('Evidencia', e.status === 409 ? e.message : 'No fue posible mostrar la evidencia.'); }
   const p = d.pago;
-  $('evid-datos').innerHTML = dl([['ID', p.codigo], ['Concepto', esc(p.concepto)], ['Entidad', esc(p.entidad)], ['Categoría', esc(p.categoria)], ...detalleHtml(p), ['Monto', soles(p.monto)], ...(p.mora > 0 ? [['Mora pagada', soles(p.mora)], ['Total pagado', soles(p.total)]] : []), ['Método de pago', esc(p.metodo_texto || '—')], ['Fecha y hora de pago', `${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}`], ['Comentario del pago', p.comentario ? esc(p.comentario) : '—']]);
+  $('evid-datos').innerHTML = dl([['ID', p.codigo], ['Concepto', esc(p.concepto)], ['Entidad', esc(p.entidad)], ['Categoría', esc(p.categoria)], ...detalleHtml(p), ['Monto', cuenta(p.monto)], ...(p.mora > 0 ? [['Mora pagada', cuenta(p.mora)], ['Total pagado', cuenta(p.total)]] : []), ['Método de pago', esc(p.metodo_texto || '—')], ['Fecha y hora de pago', `${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}`], ['Comentario del pago', p.comentario ? esc(p.comentario) : '—']]);
   const mostrar = (a, etiqueta) => {
     const url = `/api/evidencias/${a.id}`;
     $('evid-cuerpo').innerHTML = `<p class="evid-etq">${etiqueta}: ${esc(a.nombre)}</p><p class="evid-com">Comentario: ${a.comentario ? esc(a.comentario) : '—'}</p>` + (a.tipo === 'application/pdf' ? `<iframe src="${url}" title="Evidencia"></iframe>` : `<img src="${url}" alt="Evidencia del pago">`);
@@ -183,7 +232,7 @@ async function abrirEvidencia(pagoId) {
   $('evid-previos').innerHTML = d.previos.length ? `<h4>Intentos previos (solo lectura)</h4><ul class="previos">${d.previos.map((a) => `<li><span>Intento ${a.numero_intento} · ${esc(a.nombre)} · reemplazado el ${esc(a.reemplazada_en)}<br><small>Comentario: ${a.comentario ? esc(a.comentario) : '—'}</small></span>
       <button class="btn btn-claro btn-sm" data-prev="${a.id}">Ver</button> <a class="btn btn-claro btn-sm" href="/api/evidencias/${a.id}?descargar=1">Descargar</a></li>`).join('')}</ul>` : '';
   $('evid-previos').querySelectorAll('[data-prev]').forEach((b) => (b.onclick = () => mostrar(d.previos.find((x) => String(x.id) === b.dataset.prev), 'Intento previo')));
-  $('dlg-evid').showModal();
+  $('dlg-evid').showModal(); animarContadores($('evid-datos'));
 }
 $('evid-cerrar').onclick = () => { $('dlg-evid').close(); $('evid-cuerpo').innerHTML = ''; };
 
@@ -196,12 +245,10 @@ function cambiarVista(v) {
 }
 document.querySelectorAll('.tab').forEach((t) => (t.onclick = async () => { cambiarVista(t.dataset.vista); if (t.dataset.vista === 'vencer') await cargarVencer(); }));
 
-function etiquetaEstado(p) {
-  if (p.estado === 'PAGADO') return '<span class="etq PAGADO">Pagado</span>';
-  return '<span class="etq PENDIENTE">Pendiente</span>' + (p.alerta === 'ATRASADO' ? ' <span class="etq ATRASADO">Atrasado</span>' : '');
-}
+const etiquetaEstado = (p) => chipEstado(p) + motivoCong(p);
 const btnVer = (id) => `<button class="btn btn-claro btn-sm" data-ver="${id}">Ver detalles</button>`;
 function botonesPago(p) {
+  if (p.congelado) return `<div class="acc-col"><span class="nota-cong">❄ Congelado por el gerente</span>${btnVer(p.id)}</div>`;
   if (p.estado === 'PENDIENTE') return `<div class="acc-col"><button class="btn btn-primario btn-sm" data-pagar="${p.id}">Registrar pago</button>${btnVer(p.id)}</div>`;
   return `<div class="acc-col"><button class="btn btn-claro btn-sm" data-cambiar="${p.id}">Cambiar evidencia</button><small>Cambios: ${p.intentos_usados}/3</small>${btnVer(p.id)}</div>`;
 }
@@ -215,12 +262,13 @@ async function cargarMes() {
   $('mes-titulo').textContent = nombreMes(mes);
   const r = d.resumen;
   $('resumen').innerHTML = `
-    <div class="kpi azul"><div class="kpi-icono">💼</div><div><small>Total del mes</small><b>${soles(r.total_mes)}</b></div></div>
-    <div class="kpi verde"><div class="kpi-icono">✅</div><div><small>Ya pagado</small><b>${soles(r.pagado_mes)}</b></div></div>
-    <div class="kpi ambar"><div class="kpi-icono">⏳</div><div><small>Falta pagar (${r.n_pendientes})</small><b>${soles(r.pendiente_total)}</b></div></div>`;
+    <div class="kpi azul"><div class="kpi-icono">💼</div><div><small>Total del mes</small><b>${cuenta(r.total_mes)}</b></div></div>
+    <div class="kpi verde"><div class="kpi-icono">✅</div><div><small>Ya pagado</small><b>${cuenta(r.pagado_mes)}</b></div></div>
+    <div class="kpi ambar"><div class="kpi-icono">⏳</div><div><small>Falta pagar (${r.n_pendientes})</small><b>${cuenta(r.pendiente_total)}</b></div></div>`;
+  animarContadores($('resumen'));
   if (!d.pagos.length) vacioMes('No hay pagos registrados para este mes.', false); else $('vacio-mes').hidden = true;
   $('m-vista-lista').hidden = vistaMes !== 'lista' || !d.pagos.length; $('m-vista-cal').hidden = vistaMes !== 'cal' || !d.pagos.length;
-  $('filas').innerHTML = d.pagos.map((p) => `<tr class="${p.alerta === 'ATRASADO' ? 'fila-atrasada' : ''}">
+  $('filas').innerHTML = d.pagos.map((p) => `<tr class="${claseFila(p)}">
     <td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b><br><small>${esc(p.entidad)}</small></td><td><span class="cat">${esc(p.categoria)}</span></td><td class="monto">${celdaMonto(p)}</td>
     <td>${fmtFecha(p.fecha_vencimiento)}</td><td>${etiquetaEstado(p)}</td><td>${p.estado === 'PAGADO' ? `${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}<br><small>${esc(p.metodo_texto || '')}</small>` : '—'}</td><td class="acciones">${botonesPago(p)}</td></tr>`).join('');
   pintarCalendario(d);
@@ -235,13 +283,13 @@ function pintarCalendario(d) {
   let celdas = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((t) => `<div class="cal-cab">${t}</div>`).join('') + '<div class="cal-vacio"></div>'.repeat(inicio);
   for (let n = 1; n <= dias; n++) {
     const f = `${d.mes}-${String(n).padStart(2, '0')}`;
-    celdas += `<div class="cal-dia${f === d.hoy ? ' hoy' : ''}"><span class="cal-n">${n}</span>${(porDia[n] || []).map((p) => `<button class="cal-pago ${p.estado === 'PAGADO' ? 'ok' : p.alerta === 'ATRASADO' ? 'atr' : 'pen'}" data-detalle="${p.id}" title="${esc(p.concepto)} · ${esc(p.entidad)} · ${soles(p.monto)}">${esc(p.concepto)}</button>`).join('')}</div>`;
+    celdas += `<div class="cal-dia${f === d.hoy ? ' hoy' : ''}"><span class="cal-n">${n}</span>${(porDia[n] || []).map((p) => `<button class="cal-pago ${p.estado === 'PAGADO' ? 'ok' : p.congelado ? 'cong' : p.alerta === 'ATRASADO' ? 'atr' : 'pen'}" data-detalle="${p.id}" title="${esc(p.concepto)} · ${esc(p.entidad)} · ${soles(p.monto)}">${esc(p.concepto)}</button>`).join('')}</div>`;
   }
   $('m-vista-cal').innerHTML = (previos.length ? `<div class="cal-previos"><b>Atrasados de meses anteriores:</b> ${previos.map((p) => `<button class="cal-pago atr" data-detalle="${p.id}">${esc(p.concepto)} (${fmtFecha(p.fecha_vencimiento)})</button>`).join('')}</div>` : '') + `<div class="cal">${celdas}</div>`;
   $('m-vista-cal').querySelectorAll('[data-detalle]').forEach((b) => (b.onclick = () => {
     const p = pagosMes.find((x) => String(x.id) === b.dataset.detalle);
-    aviso(`${p.codigo} · ${p.concepto}`, `Entidad: ${p.entidad}\nCategoría: ${p.categoria}\n${(p.detalle || []).map(([k, v]) => `${k}: ${v}\n`).join('')}Monto: ${soles(p.monto)}\n${p.mora > 0 ? `Mora: ${soles(p.mora)} (total ${soles(p.total)})\n` : ''}${p.metodo_texto ? `Método de pago: ${p.metodo_texto}\n` : ''}Vencimiento: ${fmtFecha(p.fecha_vencimiento)}\nEstado: ${p.estado === 'PAGADO' ? `Pagado el ${fmtFecha(p.fecha_pago)} ${p.hora_pago || ''}` : p.alerta === 'ATRASADO' ? 'Pendiente (atrasado)' : 'Pendiente'}`,
-      p.estado === 'PENDIENTE' ? { texto: 'Registrar pago', accion: () => abrirPagar(p) } : null);
+    aviso(`${p.codigo} · ${p.concepto}`, `Entidad: ${p.entidad}\nCategoría: ${p.categoria}\n${(p.detalle || []).map(([k, v]) => `${k}: ${v}\n`).join('')}Monto: ${soles(p.monto)}\n${p.mora > 0 ? `Mora: ${soles(p.mora)} (total ${soles(p.total)})\n` : ''}${p.metodo_texto ? `Método de pago: ${p.metodo_texto}\n` : ''}Vencimiento: ${fmtFecha(p.fecha_vencimiento)}\nEstado: ${p.estado === 'PAGADO' ? `Pagado el ${fmtFecha(p.fecha_pago)} ${p.hora_pago || ''}` : p.congelado ? 'Congelado por el gerente' : p.alerta === 'ATRASADO' ? 'Atrasado' : 'Pendiente'}`,
+      p.estado === 'PENDIENTE' && !p.congelado ? { texto: 'Registrar pago', accion: () => abrirPagar(p) } : null);
   }));
 }
 $('m-lista').onclick = () => { vistaMes = 'lista'; $('m-lista').classList.add('activo'); $('m-cal').classList.remove('activo'); cargarMes(); };
@@ -257,9 +305,9 @@ async function cargarVencer() {
   pagosVencer = d.pagos; diasVencer = d.dias_por_vencer; $('dias-vencer').textContent = diasVencer;
   $('n-vencer').textContent = d.pagos.length; $('n-vencer').hidden = !d.pagos.length;
   $('vacio-vencer').hidden = d.pagos.length > 0; $('vacio-vencer').className = 'vacio'; $('vacio-vencer').textContent = 'No hay pagos por vencer.';
-  $('filas-vencer').innerHTML = d.pagos.map((p) => `<tr class="${p.alerta === 'ATRASADO' ? 'fila-atrasada' : ''}"><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b><br><small>${esc(p.entidad)}</small></td><td><span class="cat">${esc(p.categoria)}</span></td>
+  $('filas-vencer').innerHTML = d.pagos.map((p) => `<tr class="${claseFila(p)}"><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b><br><small>${esc(p.entidad)}</small></td><td><span class="cat">${esc(p.categoria)}</span></td>
     <td class="monto">${celdaMonto(p)}</td><td>${fmtFecha(p.fecha_vencimiento)}</td>
-    <td>${p.alerta === 'ATRASADO' ? `<span class="etq ATRASADO">Atrasado · ${-p.dias} ${-p.dias === 1 ? 'día' : 'días'}</span>` : `<span class="etq POR_VENCER">${p.dias === 0 ? 'Vence hoy' : p.dias === 1 ? 'Falta 1 día' : `Faltan ${p.dias} días`}</span>`}</td>
+    <td>${chipEstado(p)}</td>
     <td class="acciones">${botonesPago(p)}</td></tr>`).join('');
   enlazarAcciones($('vista-vencer'));
   return d;
@@ -314,23 +362,34 @@ $('n-primera').addEventListener('input', pistaCuotas); $('n-venc-total').addEven
 $('n-cuotas').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, ''); });
 for (const i of ['n-recibo', 'n-suministro']) $(i).addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^A-Za-z0-9-]/g, ''); });
 
+// «Pago atrasado»: la fecha debe ser anterior a hoy (hasta 1 año atrás); si no, debe ser hoy o posterior (hasta 1 año)
+function ajustarFechaVenc() {
+  const atr = $('n-atrasado').checked; const hoyL = fechaLima(); const v = $('n-venc'); $('hint-atrasado').hidden = !atr;
+  const lim = new Date(); lim.setFullYear(lim.getFullYear() + (atr ? -1 : 1));
+  if (atr) { v.min = fechaLima(lim); v.max = sumaDias(hoyL, -1); if (v.value && v.value >= hoyL) v.value = ''; }
+  else { v.min = hoyL; v.max = fechaLima(lim); if (v.value && v.value < hoyL) v.value = ''; }
+}
+$('n-atrasado').onchange = ajustarFechaVenc;
 $('btn-nuevo').onclick = () => {
   ['n-tipo', 'n-ent-serv', 'n-recibo', 'n-suministro', 'n-ruc', 'n-razon', 'n-ent-imp', 'n-monto', 'n-venc', 'n-ent-pre', 'n-monto-total', 'n-cuotas', 'n-mora', 'n-venc-total', 'n-primera'].forEach((i) => ($(i).value = ''));
   $('n-ent-imp').onchange(); pistaCuotas(); $('sel-cat').value = ''; mostrarFormulario(); limpiarErrores($('dlg-nuevo'));
   const max = new Date(); max.setFullYear(max.getFullYear() + 1);
   $('n-venc').min = $('n-primera').min = fechaLima(); $('n-venc').max = $('n-primera').max = fechaLima(max);
+  $('n-atrasado').checked = false; ajustarFechaVenc();
   $('n-venc-total').min = fechaLima(); { const m5 = new Date(); m5.setFullYear(m5.getFullYear() + 10); $('n-venc-total').max = fechaLima(m5); }
   $('nuevo-error').textContent = ''; $('nuevo-error2').textContent = ''; $('nuevo-paso1').hidden = false; $('nuevo-paso2').hidden = true; $('dlg-nuevo').showModal();
 };
 function leerNuevo() {
   const c = catActual(); const b = { categoria_id: $('sel-cat').value };
+  if (c && c !== 'Préstamos') b.atrasado = $('n-atrasado').checked;
   if (c === 'Servicios') Object.assign(b, { tipo_servicio: $('n-tipo').value, entidad: $('n-ent-serv').value, numero_recibo: $('n-recibo').value, ...(['Luz', 'Agua'].includes($('n-tipo').value) ? { codigo_suministro: $('n-suministro').value } : {}), monto: $('n-monto').value, fecha_vencimiento: $('n-venc').value });
   else if (c === 'Proveedores') Object.assign(b, { ruc: $('n-ruc').value, razon_social: $('n-razon').value, monto: $('n-monto').value, fecha_vencimiento: $('n-venc').value });
   else if (c === 'Impuestos') Object.assign(b, { entidad: $('n-ent-imp').value, concepto_impuesto: $('n-imp').value, monto: $('n-monto').value, fecha_vencimiento: $('n-venc').value });
   else if (c === 'Préstamos') Object.assign(b, { entidad: $('n-ent-pre').value, monto_total: $('n-monto-total').value, num_cuotas: $('n-cuotas').value, mora_tna: $('n-mora').value, fecha_vencimiento_total: $('n-venc-total').value, fecha_primera_cuota: $('n-primera').value });
   return b;
 }
-function resumenNuevo(d, cat) {
+function resumenNuevo(d, cat) { const f = resumenNuevo0(d, cat); return d.atrasado ? [...f, ['Situación', '<span class="etq ATRASADO">Pago atrasado</span>']] : f; }
+function resumenNuevo0(d, cat) {
   const t = (k) => esc((d[k] ?? '').toString().trim());
   if (cat === 'Servicios') return [['Categoría', cat], ['Servicio', t('tipo_servicio')], ['Entidad', t('entidad')], ['N.º de recibo', t('numero_recibo')], ...(d.codigo_suministro ? [['Código de suministro', t('codigo_suministro')]] : []), ['Monto', soles(d.monto)], ['Vencimiento', fmtFecha(d.fecha_vencimiento)]];
   if (cat === 'Proveedores') return [['Categoría', cat], ['RUC', t('ruc')], ['Razón social', t('razon_social')], ['Monto', soles(d.monto)], ['Vencimiento', fmtFecha(d.fecha_vencimiento)]];
@@ -345,10 +404,10 @@ $('nuevo-continuar').onclick = async () => {
     const cat = catActual();
     $('nuevo-resumen').innerHTML = dl(resumenNuevo(nuevoDatos, cat));
     const cu = $('nuevo-cuotas'); cu.hidden = !r.cuotas;
-    if (r.cuotas) cu.innerHTML = `<p class="confirma-t">Previsualización de las ${r.cuotas.length} ${r.cuotas.length === 1 ? 'cuota' : 'cuotas'} que se generarán:</p><div class="cuotas-scroll"><table class="cuotas-tabla"><thead><tr><th>Cuota</th><th>Fecha de vencimiento</th><th class="der">Monto</th></tr></thead><tbody>${r.cuotas.map((q) => `<tr><td>${q.numero} de ${r.cuotas.length}</td><td>${fmtFecha(q.fecha)}</td><td class="der">${soles(q.monto)}</td></tr>`).join('')}</tbody></table></div>`;
+    if (r.cuotas) cu.innerHTML = `<p class="confirma-t">Previsualización de las ${r.cuotas.length} ${r.cuotas.length === 1 ? 'cuota' : 'cuotas'} que se generarán:</p><div class="cuotas-scroll"><table class="cuotas-tabla"><thead><tr><th>Cuota</th><th>Fecha de vencimiento</th><th class="der">Monto</th></tr></thead><tbody>${r.cuotas.map((q) => `<tr><td>${q.numero} de ${r.cuotas.length}</td><td>${fmtFecha(q.fecha)}</td><td class="der">${cuenta(q.monto)}</td></tr>`).join('')}</tbody></table></div>`;
     const dup = $('nuevo-dup'); dup.hidden = !r.duplicado;
     if (r.duplicado) { const x = r.duplicado; dup.innerHTML = `⚠ Este pago podría ser un pago repetido. Ya existe: <b>${esc(x.concepto)}</b> · ${esc(x.entidad)} · ${esc(x.categoria)} · ${soles(x.monto)} · vence ${fmtFecha(x.fecha_vencimiento)} (${x.estado === 'PAGADO' ? 'Pagado' : 'Pendiente'}). Puedes cancelar o confirmar el registro.`; }
-    $('nuevo-paso1').hidden = true; $('nuevo-paso2').hidden = false;
+    $('nuevo-paso1').hidden = true; $('nuevo-paso2').hidden = false; animarContadores($('nuevo-cuotas'));
   } catch (e) {
     if (e.sesion) return;
     if (e.campos) document.querySelectorAll('#dlg-nuevo [data-err]').forEach((s) => (s.textContent = e.campos[s.dataset.err] || ''));
@@ -368,8 +427,8 @@ $('nuevo-confirmar').onclick = async () => {
 // ---------- HU-06: registrar pago como realizado ----------
 let pagoActual = null;
 function datosPago(p) {
-  return dl([['ID', p.codigo], ['Concepto', esc(p.concepto)], ['Entidad', esc(p.entidad)], ['Categoría', esc(p.categoria)], ...detalleHtml(p), ['Monto', soles(p.monto)],
-    ...(p.mora > 0 ? [['Mora por atraso', soles(p.mora)], ['Total a pagar', soles(p.total)]] : []), ['Vencimiento', fmtFecha(p.fecha_vencimiento)]]);
+  return dl([['ID', p.codigo], ['Concepto', esc(p.concepto)], ['Entidad', esc(p.entidad)], ['Categoría', esc(p.categoria)], ...detalleHtml(p), ['Monto', cuenta(p.monto)],
+    ...(p.mora > 0 ? [['Mora por atraso', cuenta(p.mora)], ['Total a pagar', cuenta(p.total)]] : []), ['Vencimiento', fmtFecha(p.fecha_vencimiento)], ['Estado', chipEstado(p)]]);
 }
 // Método de pago (con qué se pagó). Préstamos: solo transferencia a cuenta bancaria o tarjeta de crédito.
 const SUBS = { BILLETERA: ['Billetera', { PLIN: 'Plin', YAPE: 'Yape', AGORA: 'Agora' }], TARJETA: ['Tipo de tarjeta', { CREDITO: 'Crédito', DEBITO: 'Débito' }] };
@@ -398,7 +457,7 @@ function abrirPagar(p) {
   pagoActual = p; $('pagar-datos').innerHTML = datosPago(p);
   const hoyL = fechaLima(); const f = $('pagar-fecha'); f.value = hoyL; f.max = hoyL; f.min = sumaDias(hoyL, -7); $('pagar-hora').value = horaLima();
   armarMetodos(p); $('pagar-coment').value = ''; $('pagar-archivo').value = ''; limpiarErrores($('dlg-pagar')); $('pagar-error').textContent = '';
-  $('pagar-paso1').hidden = false; $('pagar-paso2').hidden = true; $('dlg-pagar').showModal();
+  $('pagar-paso1').hidden = false; $('pagar-paso2').hidden = true; $('dlg-pagar').showModal(); animarContadores($('pagar-datos'));
 }
 $('pagar-continuar').onclick = () => {
   limpiarErrores($('dlg-pagar')); let mal = false;
@@ -426,6 +485,9 @@ $('pagar-confirmar').onclick = async () => {
     await refrescar();
   } catch (e) {
     if (e.sesion) return;
+    if (e.status === 409 && e.campos && e.campos.archivo) {            // archivo repetido: se vuelve a elegir otro
+      $('pagar-paso1').hidden = false; $('pagar-paso2').hidden = true; $('pagar-archivo').value = ''; $('err-pagar-archivo').textContent = e.campos.archivo; return;
+    }
     $('pagar-error').textContent = e.red || !e.status || e.status >= 500 ? 'La operación no se completó. El pago sigue Pendiente y sin evidencia.' : e.message;
   } finally { b.disabled = false; }
 };
@@ -437,7 +499,7 @@ function abrirCambiar(p) {
   $('cambiar-archivo').value = ''; $('cambiar-coment').value = ''; limpiarErrores($('dlg-cambiar')); $('cambiar-error').textContent = '';
   $('cambiar-paso1').hidden = false; $('cambiar-paso2').hidden = true;
   if (rest <= 0) return aviso('Cambio de evidencia', 'Se alcanzó el máximo de 3 intentos de cambio de evidencia para este pago.');
-  $('dlg-cambiar').showModal();
+  $('dlg-cambiar').showModal(); animarContadores($('cambiar-datos'));
 }
 $('cambiar-continuar').onclick = () => {
   limpiarErrores($('dlg-cambiar')); const a = $('cambiar-archivo').files[0]; const ea = validarArchivo(a);
@@ -451,7 +513,9 @@ $('cambiar-confirmar').onclick = async () => {
   try {
     const r = await enviarArchivo(`/api/pagos/${pagoActual.id}/evidencia`, $('cambiar-archivo').files[0], { 'X-Comentario': encodeURIComponent($('cambiar-coment').value.trim()) });
     $('dlg-cambiar').close(); aviso('Evidencia cambiada', `La evidencia se cambió correctamente. Te ${r.intentos_restantes === 1 ? 'queda 1 intento' : `quedan ${r.intentos_restantes} intentos`} de cambio.`); await refrescar();
-  } catch (e) { if (!e.sesion) $('cambiar-error').textContent = e.red || !e.status || e.status >= 500 ? 'La operación no se completó. Se mantiene la evidencia actual.' : e.message; }
+  } catch (e) {
+    if (!e.sesion && e.status === 409 && e.campos && e.campos.archivo) { $('cambiar-paso1').hidden = false; $('cambiar-paso2').hidden = true; $('cambiar-archivo').value = ''; $('err-cambiar-archivo').textContent = e.campos.archivo; return; }
+    if (!e.sesion) $('cambiar-error').textContent = e.red || !e.status || e.status >= 500 ? 'La operación no se completó. Se mantiene la evidencia actual.' : e.message; }
   finally { b.disabled = false; }
 };
 

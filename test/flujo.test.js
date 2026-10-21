@@ -33,9 +33,12 @@ const crear = async (o) => {
   if (r.status === 201 && o.concepto) await query('UPDATE pagos SET concepto = $2 WHERE id = $1', [r.json.id, o.concepto]);
   return r;
 };
-const pagarCon = (id, archivo, extra = {}) => pedir(asistente, 'PUT', `/api/pagos/${id}/pagar`, archivo,
+// Cada archivo de prueba debe ser distinto (el sistema rechaza archivos repetidos): se le añade un sufijo único. Con { exacto: true } se envía tal cual.
+let contadorArchivo = 0;
+const unico = (b, exacto) => (Buffer.isBuffer(b) && !exacto && b.length < 1_000_000 ? Buffer.concat([b, Buffer.from(` #${++contadorArchivo}-${Math.random()}`)]) : b);
+const pagarCon = (id, archivo, extra = {}) => pedir(asistente, 'PUT', `/api/pagos/${id}/pagar`, unico(archivo, extra.exacto),
   { 'X-Fecha-Pago': hoy(), 'X-Hora-Pago': '00:00', 'X-Nombre': 'boleta.png', 'X-Metodo-Pago': 'EFECTIVO', ...extra });
-const cambiarCon = (id, archivo) => pedir(asistente, 'PUT', `/api/pagos/${id}/evidencia`, archivo, { 'X-Nombre': 'nueva.png' });
+const cambiarCon = (id, archivo, exacto) => pedir(asistente, 'PUT', `/api/pagos/${id}/evidencia`, unico(archivo, exacto), { 'X-Nombre': 'nueva.png' });
 const idPor = async (c) => (await query('SELECT id FROM pagos WHERE concepto = $1', [c]))[0].id;
 
 test.before(async () => {
@@ -401,3 +404,83 @@ test('Sesión única por usuario (gerente y asistente pueden estar a la vez)', a
   assert.equal((await pedir(g1, 'GET', '/api/panel')).status, 200);                         // la sesión del gerente no se toca
 });
 
+
+// El test de sesión única deja sesiones nuevas: se vuelve a ingresar para las pruebas siguientes
+const reingresar = async () => {
+  gerente = (await pedir(null, 'POST', '/api/login', { usuario: 'Gerente', clave: 'gerente123' })).cookie;
+  asistente = (await pedir(null, 'POST', '/api/login', { usuario: 'Asistente', clave: 'asistente123' })).cookie;
+};
+test('Congelar: solo el gerente; el pago congelado no se puede pagar, no es atrasado ni por vencer y muestra su estado', async () => {
+  await reingresar();
+  const id = (await crear({ concepto: 'Para congelar', fecha_vencimiento: mas(1) })).json.id;
+  const idAtr = (await crear({ concepto: 'Atrasado y congelado', fecha_vencimiento: mas(-9), atrasado: true })).json.id;
+  assert.equal((await pedir(asistente, 'POST', `/api/pagos/${id}/congelar`, {})).status, 403);          // el asistente no puede
+  assert.equal((await pedir(gerente, 'POST', `/api/pagos/${id}/congelar`, { motivo: 'x'.repeat(201) })).status, 400);
+  assert.equal((await pedir(gerente, 'POST', `/api/pagos/${id}/congelar`, { motivo: 'En revisión legal' })).status, 200);
+  assert.equal((await pedir(gerente, 'POST', `/api/pagos/${id}/congelar`, {})).status, 409);            // ya estaba congelado
+  assert.equal((await pedir(gerente, 'POST', `/api/pagos/${idAtr}/congelar`, {})).status, 200);         // también un atrasado
+  // estados visibles
+  const lista = (await pedir(asistente, 'GET', '/api/pagos')).json.pagos;
+  const pf = lista.find((p) => p.id === id); assert.equal(pf.estado_visible, 'CONGELADO'); assert.equal(pf.alerta, null);
+  assert.equal(lista.find((p) => p.id === idAtr).estado_visible, 'CONGELADO');
+  assert.equal(lista.find((p) => p.id === idAtr).mora, 0);
+  // no aparece en «por vencer» ni cuenta en el aviso
+  const pv = (await pedir(asistente, 'GET', '/api/pagos/por-vencer')).json.pagos;
+  assert.ok(!pv.some((p) => p.id === id || p.id === idAtr));
+  // no se puede registrar como realizado
+  const r = await pagarCon(id, PNG); assert.equal(r.status, 409); assert.match(r.json.error, /congelado/);
+  assert.equal((await query('SELECT estado FROM pagos WHERE id=$1', [id]))[0].estado, 'PENDIENTE');
+  // panel del gerente: resumen y detalle
+  const panel = (await pedir(gerente, 'GET', '/api/panel')).json;
+  assert.ok(panel.resumen.congelados.n >= 2);
+  assert.ok(panel.pendientes.some((p) => p.id === id && p.estado_visible === 'CONGELADO'));
+  const det = (await pedir(gerente, 'GET', `/api/pagos/${id}/detalle`)).json.pago; assert.equal(det.estado_visible, 'CONGELADO'); assert.equal(det.motivo_congelado, 'En revisión legal');
+  // descongelar: vuelve a Pendiente / Atrasado y se puede pagar
+  assert.equal((await pedir(asistente, 'POST', `/api/pagos/${id}/descongelar`)).status, 403);
+  assert.equal((await pedir(gerente, 'POST', `/api/pagos/${id}/descongelar`)).status, 200);
+  assert.equal((await pedir(gerente, 'POST', `/api/pagos/${id}/descongelar`)).status, 409);
+  assert.equal((await pedir(gerente, 'POST', `/api/pagos/${idAtr}/descongelar`)).status, 200);
+  const l2 = (await pedir(asistente, 'GET', '/api/pagos')).json.pagos;
+  assert.equal(l2.find((p) => p.id === id).estado_visible, 'PENDIENTE'); assert.equal(l2.find((p) => p.id === idAtr).estado_visible, 'ATRASADO');
+  assert.equal((await pagarCon(id, PNG)).status, 200);
+  // un pago ya Pagado no se puede congelar
+  assert.equal((await pedir(gerente, 'POST', `/api/pagos/${id}/congelar`, {})).status, 409);
+  assert.equal((await pedir(gerente, 'POST', '/api/pagos/999999/congelar', {})).status, 404);
+  const pagado = (await pedir(asistente, 'GET', '/api/pagos')).json.pagos.find((p) => p.id === id); assert.equal(pagado.estado_visible, 'PAGADO');
+});
+
+test('Pago atrasado: se puede registrar con vencimiento anterior a hoy (y solo si se marca como atrasado)', async () => {
+  // sin marcar «atrasado», una fecha pasada se rechaza con una pista
+  const sin = await crear({ fecha_vencimiento: mas(-3) });
+  assert.equal(sin.status, 400); assert.match(sin.json.campos.fecha_vencimiento, /atrasado/i);
+  // marcado como atrasado: la fecha debe ser anterior a hoy
+  const hoyMismo = await crear({ fecha_vencimiento: hoy(), atrasado: true });
+  assert.equal(hoyMismo.status, 400); assert.match(hoyMismo.json.campos.fecha_vencimiento, /anterior a hoy/);
+  assert.equal((await crear({ fecha_vencimiento: mas(10), atrasado: true })).status, 400);               // futura: no es atrasado
+  assert.equal((await crear({ fecha_vencimiento: mas(-400), atrasado: true })).status, 400);              // más de 1 año atrás
+  assert.equal((await pedir(asistente, 'POST', '/api/pagos/verificar', nuevo({ fecha_vencimiento: mas(-5), atrasado: true }))).status, 200);
+  const ok = await crear({ concepto: 'Luz atrasada registrada', fecha_vencimiento: mas(-5), atrasado: true, numero_recibo: 'R-ATR' });
+  assert.equal(ok.status, 201);
+  const p = (await pedir(asistente, 'GET', '/api/pagos')).json.pagos.find((x) => x.id === ok.json.id);
+  assert.equal(p.estado_visible, 'ATRASADO'); assert.equal(p.alerta, 'ATRASADO'); assert.equal(p.dias, -5);
+  assert.ok((await pedir(asistente, 'GET', '/api/pagos/por-vencer')).json.pagos.some((x) => x.id === ok.json.id));
+  assert.equal((await pagarCon(ok.json.id, PNG)).status, 200);                                            // se puede pagar normalmente
+});
+
+test('Evidencias: no se aceptan archivos repetidos (en otro pago ni en intentos del mismo pago)', async () => {
+  const a = (await crear({ concepto: 'Dup A', numero_recibo: 'R-DA' })).json.id; const b = (await crear({ concepto: 'Dup B', numero_recibo: 'R-DB' })).json.id;
+  const f1 = Buffer.concat([PNG, Buffer.from('archivo-uno')]); const f2 = Buffer.concat([PNG, Buffer.from('archivo-dos')]); const f3 = Buffer.concat([JPG, Buffer.from('archivo-tres')]);
+  assert.equal((await pagarCon(a, f1, { exacto: true })).status, 200);
+  // mismo archivo en otro pago -> rechazado, el pago sigue Pendiente
+  const r = await pagarCon(b, f1, { exacto: true }); assert.equal(r.status, 409); assert.match(r.json.error, /ya fue usado como evidencia del pago PAG-/);
+  assert.equal((await query('SELECT estado FROM pagos WHERE id=$1', [b]))[0].estado, 'PENDIENTE');
+  assert.equal((await pagarCon(b, f2, { exacto: true })).status, 200);
+  // cambiar la evidencia por la misma vigente / por la de otro pago -> rechazado y no cuenta intento
+  let c = await cambiarCon(a, f1, true); assert.equal(c.status, 409); assert.match(c.json.error, /igual a la evidencia vigente/);
+  c = await cambiarCon(a, f2, true); assert.equal(c.status, 409); assert.match(c.json.error, /ya fue usado como evidencia del pago/);
+  assert.equal((await query('SELECT count(*)::int n FROM evidencias WHERE pago_id=$1 AND NOT vigente', [a]))[0].n, 0);
+  assert.equal((await cambiarCon(a, f3, true)).status, 200);                                              // uno distinto sí
+  // volver a subir el intento anterior (f1) -> rechazado
+  c = await cambiarCon(a, f1, true); assert.equal(c.status, 409); assert.match(c.json.error, /igual a un intento anterior/);
+  assert.equal((await query('SELECT count(*)::int n FROM evidencias WHERE pago_id=$1 AND NOT vigente', [a]))[0].n, 1);
+});

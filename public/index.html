@@ -28,13 +28,13 @@
       <section class="login-arte" aria-hidden="true">
         <svg viewBox="0 0 600 700" preserveAspectRatio="xMidYMid slice">
           <defs>
-            <linearGradient id="w1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0a2a7a"/><stop offset="1" stop-color="#2a6fe0"/></linearGradient>
-            <linearGradient id="w2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f5e3c8"/><stop offset=".55" stop-color="#9fc4f2"/><stop offset="1" stop-color="#1e57c9"/></linearGradient>
+            <linearGradient id="w1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#052e22"/><stop offset="1" stop-color="#16875d"/></linearGradient>
+            <linearGradient id="w2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e6f5ec"/><stop offset=".55" stop-color="#8fd3b0"/><stop offset="1" stop-color="#0f6b4a"/></linearGradient>
             <filter id="d"><feGaussianBlur stdDeviation="14"/></filter>
           </defs>
           <rect width="600" height="700" fill="url(#w1)"/>
           <path d="M330 -20C470 120 250 250 330 380C400 500 540 520 600 600V-20Z" fill="url(#w2)" filter="url(#d)" opacity=".95"/>
-          <path d="M260 -20C380 130 160 260 250 400C330 520 470 560 600 700H0V-20Z" fill="#0a2468" opacity=".55" filter="url(#d)"/>
+          <path d="M260 -20C380 130 160 260 250 400C330 520 470 560 600 700H0V-20Z" fill="#04261c" opacity=".55" filter="url(#d)"/>
         </svg>
         <div class="login-bienvenida"><h2>Bienvenido.</h2><p>Sistema de control de egresos de la empresa Castillo. Registre, consulte y supervise los pagos de forma segura.</p></div>
       </section>
@@ -71,8 +71,8 @@
           <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Estado</th><th></th></tr></thead><tbody id="g-hoy-f"></tbody></table><p id="g-hoy-v" class="vacio" hidden>No hay pagos con vencimiento hoy.</p></section>
         <section class="tarjeta tabla-tarjeta" id="g-pagado"><div class="tarj-t"><h3>Lo pagado</h3><small>Del más reciente al más antiguo</small></div>
           <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th>Categoría</th><th class="der">Monto</th><th>Fecha y hora de pago</th><th>Método de pago</th><th></th></tr></thead><tbody id="g-pagado-f"></tbody></table><p id="g-pagado-v" class="vacio" hidden>Aún no hay pagos realizados este mes.</p></section>
-        <section class="tarjeta tabla-tarjeta" id="g-pend"><div class="tarj-t"><h3>Pendientes del mes</h3><small>Los atrasados aparecen marcados</small></div>
-          <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Vencimiento</th><th>Situación</th><th></th></tr></thead><tbody id="g-pend-f"></tbody></table><p id="g-pend-v" class="vacio" hidden>No hay pagos pendientes.</p></section>
+        <section class="tarjeta tabla-tarjeta" id="g-pend"><div class="tarj-t"><h3>Pendientes del mes</h3><small>Los atrasados y congelados aparecen marcados</small></div>
+          <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Vencimiento</th><th>Estado</th><th></th></tr></thead><tbody id="g-pend-f"></tbody></table><p id="g-pend-v" class="vacio" hidden>No hay pagos pendientes.</p></section>
         <section class="tarjeta tabla-tarjeta" id="g-cambios"><div class="tarj-t"><h3>Cambios de evidencia</h3></div>
           <table><thead><tr><th>ID</th><th>Pago</th><th>Intento</th><th>Fecha y hora del cambio</th><th></th></tr></thead><tbody id="g-cambios-f"></tbody></table><p id="g-cambios-v" class="vacio" hidden>No hay cambios de evidencia.</p></section>
       </div>
@@ -118,7 +118,7 @@
           <p class="subtitulo">Pendientes que vencen entre hoy y los próximos <span id="dias-vencer">3</span> días, y los atrasados</p></div></div>
         <section class="tarjeta tabla-tarjeta">
           <table>
-            <thead><tr><th>ID</th><th>Concepto</th><th>Categoría</th><th class="der">Monto</th><th>Vencimiento</th><th>Situación</th><th></th></tr></thead>
+            <thead><tr><th>ID</th><th>Concepto</th><th>Categoría</th><th class="der">Monto</th><th>Vencimiento</th><th>Estado</th><th></th></tr></thead>
             <tbody id="filas-vencer"></tbody>
           </table>
         </section>
@@ -133,6 +133,16 @@
     <h3 id="msg-titulo"></h3>
     <p id="msg-texto" class="msg-texto"></p>
     <menu><button id="msg-extra" class="btn btn-claro" hidden></button><button id="msg-ok" class="btn btn-primario">Aceptar</button></menu>
+  </dialog>
+
+  <!-- Congelar / descongelar un pago (solo gerente) -->
+  <dialog id="dlg-congelar">
+    <h3 id="cong-titulo"></h3>
+    <dl class="datos" id="cong-datos"></dl>
+    <label id="cong-motivo-lab">Motivo (opcional) <textarea id="cong-motivo" maxlength="200" rows="2" placeholder="Ej. en revisión con el proveedor"></textarea></label>
+    <p class="aviso-chico" id="cong-nota"></p>
+    <p class="error" id="cong-error"></p>
+    <menu><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="cong-confirmar"></button></menu>
   </dialog>
 
   <!-- HU-03: evidencia (solo gerente) -->
@@ -173,6 +183,8 @@
       <!-- Monto y vencimiento (Servicios, Proveedores e Impuestos) -->
       <div class="cat-form" id="f-comun" hidden>
         <label>Monto (S/) <input id="n-monto" inputmode="decimal" placeholder="0.00"><span class="campo-error" data-err="monto"></span></label>
+        <label class="check"><input type="checkbox" id="n-atrasado"> Es un pago atrasado (ya venció)</label>
+        <p class="aviso-chico" id="hint-atrasado" hidden>Un pago atrasado debe tener una fecha de vencimiento anterior a hoy (hasta 1 año atrás). Quedará registrado como Atrasado.</p>
         <label>Fecha de vencimiento <input id="n-venc" type="date"><span class="campo-error" data-err="fecha_vencimiento"></span></label>
       </div>
 
@@ -214,7 +226,7 @@
       <h4 class="det-sub">Todas las cuotas</h4>
       <div class="cuotas-scroll"><table class="cuotas-tabla"><thead><tr><th>Cuota</th><th>ID</th><th>Vencimiento</th><th class="der">Monto</th><th class="der">Mora</th><th class="der">Total</th><th>Estado</th><th>Pagado el</th></tr></thead><tbody id="det-cuotas"></tbody></table></div>
     </div>
-    <menu><button class="btn btn-primario" id="det-evid" hidden>Ver evidencia</button><button class="btn btn-claro" id="det-cerrar">Cerrar</button></menu>
+    <menu><button class="btn btn-hielo" id="det-cong" hidden></button><button class="btn btn-primario" id="det-evid" hidden>Ver evidencia</button><button class="btn btn-claro" id="det-cerrar">Cerrar</button></menu>
   </dialog>
 
   <!-- HU-06: registrar pago como realizado -->

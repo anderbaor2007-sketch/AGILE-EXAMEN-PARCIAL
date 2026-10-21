@@ -27,6 +27,9 @@ Pruebas (una por historia de usuario; usar una base **de prueba vacía**, se bor
 | HU-06 Registrar pago realizado + evidencia | `PUT /api/pagos/:id/pagar` (una sola sentencia SQL atómica) |
 | HU-07 Cambiar evidencia | `PUT /api/pagos/:id/evidencia` (máx. 3 intentos; el archivo reemplazado queda como intento previo) |
 | HU-08 Pagos por vencer | `GET /api/pagos/por-vencer` (hoy + 3 días y atrasados) |
+| Congelar pagos (gerente) | `POST /api/pagos/:id/congelar` y `/descongelar` (solo GERENTE; columnas `congelado`, `motivo_congelado`) |
+| Pago atrasado (asistente) | `POST /api/pagos` con `atrasado:true` (`validarVencimiento`) |
+| Evidencias únicas | hash SHA-256 en `evidencias.hash` (`archivoRepetido`) |
 | HU-09 Avisos | diálogo al iniciar sesión (solo asistente), calculado desde `por-vencer` |
 
 ## Reglas de negocio (constantes en `src/handlers/pagos.js`)
@@ -41,3 +44,7 @@ Pruebas (una por historia de usuario; usar una base **de prueba vacía**, se bor
 - El usuario distingue mayúsculas (`Gerente`, `Asistente`). Sin espacios; sin datos: "Ingrese usuario y contraseña".
 - Sesión única: cada usuario (Gerente / Asistente) tiene una sola sesión activa; al iniciar sesión en otro dispositivo, la anterior se cierra. Gerente y Asistente pueden estar conectados a la vez.
 - La base se crea sin pagos. Para vaciarla en cualquier momento: `limpiar-datos.sql` (SQL Editor de Neon).
+- Estado visible de cada pago: Pendiente, Pagado, Atrasado o Congelado. El gerente puede congelar/descongelar cualquier pago pendiente (motivo opcional, máx. 200 caracteres); un pago congelado no se puede pagar, no genera mora ni aparece en «por vencer».
+- Pago atrasado: el asistente marca «Es un pago atrasado»; el vencimiento debe ser anterior a hoy (hasta 12 meses atrás). Solo Servicios, Proveedores e Impuestos (no Préstamos).
+- Evidencias únicas: no se acepta un archivo idéntico (mismo contenido) al de otro pago, al vigente ni a intentos anteriores del mismo pago (409). Solo detecta archivos idénticos byte a byte.
+- Tema visual verde oscuro y blanco, con animaciones (contadores que suben desde 0, entradas suaves); respeta «reducir movimiento» del sistema.

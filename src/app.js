@@ -17,6 +17,8 @@ const RUTAS = [
   ['POST', /^\/api\/pagos\/verificar$/,               'ASISTENTE', h.verificar],        // HU-05 (aviso de repetido)
   ['POST', /^\/api\/pagos$/,                          'ASISTENTE', h.crear],            // HU-05
   ['GET',  /^\/api\/pagos\/(?<id>\d+)\/detalle$/,     null,        h.detalle],          // Ver detalles (gerente y asistente)
+  ['POST', /^\/api\/pagos\/(?<id>\d+)\/congelar$/,      'GERENTE',   h.congelar],         // Congelar un pago
+  ['POST', /^\/api\/pagos\/(?<id>\d+)\/descongelar$/,   'GERENTE',   h.descongelar],
   ['PUT',  /^\/api\/pagos\/(?<id>\d+)\/pagar$/,       'ASISTENTE', h.pagar],            // HU-06
   ['PUT',  /^\/api\/pagos\/(?<id>\d+)\/evidencia$/,   'ASISTENTE', h.cambiarEvidencia], // HU-07
   ['GET',  /^\/api\/pagos\/(?<id>\d+)\/evidencias$/,  'GERENTE',   h.infoEvidencias],   // HU-03

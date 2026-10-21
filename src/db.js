@@ -106,6 +106,16 @@ ALTER TABLE pagos ADD COLUMN IF NOT EXISTS metodo_detalle    TEXT;     -- PLIN /
 ALTER TABLE pagos ADD COLUMN IF NOT EXISTS mora_pagada       NUMERIC(12,2) NOT NULL DEFAULT 0;   -- mora cobrada al pagar una cuota atrasada
 CREATE INDEX IF NOT EXISTS ix_pagos_prestamo ON pagos(prestamo_id);
 
+-- Congelar: el gerente puede congelar un pago pendiente (no se puede pagar ni genera mora hasta descongelarlo)
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS congelado        BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS congelado_en     TIMESTAMPTZ;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS motivo_congelado TEXT;
+
+-- Evidencias: huella SHA-256 del archivo para impedir archivos repetidos (en otros pagos o en intentos del mismo pago)
+ALTER TABLE evidencias ADD COLUMN IF NOT EXISTS hash TEXT;
+UPDATE evidencias SET hash = encode(sha256(datos), 'hex') WHERE hash IS NULL;
+CREATE INDEX IF NOT EXISTS ix_evidencias_hash ON evidencias(hash);
+
 -- Avisos para el gerente (cambio de evidencia)
 CREATE TABLE IF NOT EXISTS notificaciones (
   id        SERIAL PRIMARY KEY,
