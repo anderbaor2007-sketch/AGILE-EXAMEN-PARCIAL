@@ -50,6 +50,7 @@
         <a href="#g-hoy"><span>◷</span> Pagos de hoy</a>
         <a href="#g-pagado"><span>✔</span> Lo pagado</a>
         <a href="#g-pend"><span>⏳</span> Pendientes</a>
+        <a href="#g-cong"><span>❄</span> Congelados</a>
         <a href="#g-cambios"><span>⟳</span> Cambios de evidencia</a>
       </nav>
       <button id="g-salir" class="lateral-salir"><span>⎋</span> Cerrar sesión</button>
@@ -71,8 +72,10 @@
           <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Estado</th><th></th></tr></thead><tbody id="g-hoy-f"></tbody></table><p id="g-hoy-v" class="vacio" hidden>No hay pagos con vencimiento hoy.</p></section>
         <section class="tarjeta tabla-tarjeta" id="g-pagado"><div class="tarj-t"><h3>Lo pagado</h3><small>Del más reciente al más antiguo</small></div>
           <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th>Categoría</th><th class="der">Monto</th><th>Fecha y hora de pago</th><th>Método de pago</th><th></th></tr></thead><tbody id="g-pagado-f"></tbody></table><p id="g-pagado-v" class="vacio" hidden>Aún no hay pagos realizados este mes.</p></section>
-        <section class="tarjeta tabla-tarjeta" id="g-pend"><div class="tarj-t"><h3>Pendientes del mes</h3><small>Los atrasados y congelados aparecen marcados</small></div>
+        <section class="tarjeta tabla-tarjeta" id="g-pend"><div class="tarj-t"><h3>Pendientes del mes</h3><small>Los atrasados aparecen marcados; los congelados están en la tabla de abajo</small></div>
           <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Vencimiento</th><th>Estado</th><th></th></tr></thead><tbody id="g-pend-f"></tbody></table><p id="g-pend-v" class="vacio" hidden>No hay pagos pendientes.</p></section>
+        <section class="tarjeta tabla-tarjeta" id="g-cong"><div class="tarj-t"><h3>❄ Congelados</h3><small>Pagos detenidos por el gerente: no se pueden pagar hasta descongelarlos</small></div>
+          <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Vencimiento</th><th>Estado</th><th></th></tr></thead><tbody id="g-cong-f"></tbody></table><p id="g-cong-v" class="vacio" hidden>No hay pagos congelados.</p></section>
         <section class="tarjeta tabla-tarjeta" id="g-cambios"><div class="tarj-t"><h3>Cambios de evidencia</h3></div>
           <table><thead><tr><th>ID</th><th>Pago</th><th>Intento</th><th>Fecha y hora del cambio</th><th></th></tr></thead><tbody id="g-cambios-f"></tbody></table><p id="g-cambios-v" class="vacio" hidden>No hay cambios de evidencia.</p></section>
       </div>
