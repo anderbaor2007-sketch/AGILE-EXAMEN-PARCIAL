@@ -66,13 +66,30 @@ function validarArchivos(fs) {
   const vistos = new Set(); for (const f of l) { const k = `${f.name}|${f.size}|${f.lastModified}`; if (vistos.has(k)) return `«${f.name}» está repetido en este envío.`; vistos.add(k); }
   return '';
 }
-// Muestra los archivos elegidos y, si cambian, oculta la justificación (se vuelve a pedir solo si hace falta).
+// Archivos elegidos (máximo 3). Cada uno tiene una ✕ para quitarlo y se pueden agregar otros después.
+const seleccion = { pagar: [], cambiar: [] };
+const clave = (f) => `${f.name}|${f.size}|${f.lastModified}`;
+function pintarSeleccion(pre) {
+  const l = seleccion[pre];
+  $(`${pre}-lista`).innerHTML = l.map((f, i) => `<li><span>${esc(f.name)}</span><span class="arch-der"><small>${tamanoTxt(f.size)}</small><button type="button" class="btn-x" data-quitar="${i}" title="Quitar este archivo" aria-label="Quitar ${esc(f.name)}">✕</button></span></li>`).join('')
+    + (l.length > 1 ? `<li class="total"><b>Total (${l.length} de ${MAX_ARCHIVOS})</b><small>${tamanoTxt(l.reduce((t, f) => t + f.size, 0))} de 15 MB</small></li>` : '');
+  $(`${pre}-lista`).querySelectorAll('[data-quitar]').forEach((b) => (b.onclick = () => { l.splice(Number(b.dataset.quitar), 1); $(`err-${pre}-archivo`).textContent = ''; ocultarJust(pre); pintarSeleccion(pre); }));
+  $(`${pre}-archivo`).disabled = l.length >= MAX_ARCHIVOS;               // con 3 archivos ya no se puede agregar más hasta quitar alguno
+}
+function limpiarSeleccion(pre) { seleccion[pre] = []; $(`${pre}-archivo`).value = ''; pintarSeleccion(pre); }
 function enlazarArchivos(pre) {
   const inp = $(`${pre}-archivo`);
   inp.addEventListener('change', () => {
-    const l = [...inp.files]; $(`err-${pre}-archivo`).textContent = ''; ocultarJust(pre);
-    $(`${pre}-lista`).innerHTML = l.map((f) => `<li><span>${esc(f.name)}</span><small>${tamanoTxt(f.size)}</small></li>`).join('') + (l.length > 1 ? `<li><b>Total</b><small>${tamanoTxt(l.reduce((t, f) => t + f.size, 0))} de 15 MB</small></li>` : '');
-    const ea = l.length ? validarArchivos(l) : ''; if (ea) $(`err-${pre}-archivo`).textContent = ea;
+    const nuevos = [...inp.files]; inp.value = ''; const err = $(`err-${pre}-archivo`); err.textContent = ''; ocultarJust(pre);
+    let sobran = 0;
+    for (const f of nuevos) {
+      if (seleccion[pre].some((x) => clave(x) === clave(f))) continue;                 // ya está en la lista
+      if (seleccion[pre].length >= MAX_ARCHIVOS) { sobran++; continue; }
+      seleccion[pre].push(f);
+    }
+    pintarSeleccion(pre);
+    if (sobran) err.textContent = `Solo se pueden subir ${MAX_ARCHIVOS} archivos: se agregaron los primeros y se ignoraron ${sobran}. Quita uno con la ✕ para elegir otro.`;
+    else { const ea = validarArchivos(seleccion[pre]); if (ea) err.textContent = ea; }
   });
 }
 const ocultarJust = (pre) => { $(`${pre}-just`).hidden = true; $(`${pre}-just-t`).value = ''; $(`err-${pre}-just`).textContent = ''; };
@@ -489,12 +506,12 @@ function leerMetodo() {
 function abrirPagar(p) {
   pagoActual = p; $('pagar-datos').innerHTML = datosPago(p);
   const hoyL = fechaLima(); const f = $('pagar-fecha'); f.value = hoyL; f.max = hoyL; f.min = sumaDias(hoyL, -7); $('pagar-hora').value = horaLima();
-  armarMetodos(p); $('pagar-coment').value = ''; $('pagar-archivo').value = ''; $('pagar-lista').innerHTML = ''; ocultarJust('pagar'); limpiarErrores($('dlg-pagar')); $('pagar-error').textContent = '';
+  armarMetodos(p); $('pagar-coment').value = ''; limpiarSeleccion('pagar'); ocultarJust('pagar'); limpiarErrores($('dlg-pagar')); $('pagar-error').textContent = '';
   $('pagar-paso1').hidden = false; $('pagar-paso2').hidden = true; $('dlg-pagar').showModal(); animarContadores($('pagar-datos'));
 }
 $('pagar-continuar').onclick = () => {
   limpiarErrores($('dlg-pagar')); let mal = false;
-  const fecha = $('pagar-fecha').value, hora = $('pagar-hora').value, archivo = [...$('pagar-archivo').files];
+  const fecha = $('pagar-fecha').value, hora = $('pagar-hora').value, archivo = [...seleccion.pagar];
   if (!fecha) { $('err-pagar-fecha').textContent = 'Indica la fecha de pago'; mal = true; }
   else if (fecha < sumaDias(fechaLima(), -7)) { $('err-pagar-fecha').textContent = 'No puede ser anterior a una semana'; mal = true; }
   if (!hora) { $('err-pagar-hora').textContent = 'Indica la hora de pago'; mal = true; }
@@ -512,7 +529,7 @@ enlazarArchivos('pagar'); enlazarArchivos('cambiar');
 $('pagar-volver').onclick = () => { $('pagar-paso1').hidden = false; $('pagar-paso2').hidden = true; };
 $('pagar-confirmar').onclick = async () => {
   const b = $('pagar-confirmar'); b.disabled = true; $('pagar-error').textContent = '';
-  const fecha = $('pagar-fecha').value, hora = $('pagar-hora').value, archivo = [...$('pagar-archivo').files];
+  const fecha = $('pagar-fecha').value, hora = $('pagar-hora').value, archivo = [...seleccion.pagar];
   try {
     const r = await enviarArchivos(`/api/pagos/${pagoActual.id}/pagar`, archivo, { ...cabJust('pagar'), 'X-Fecha-Pago': fecha, 'X-Hora-Pago': hora, 'X-Metodo-Pago': leerMetodo().metodo, 'X-Metodo-Detalle': leerMetodo().detalle, 'X-Comentario': encodeURIComponent($('pagar-coment').value.trim()) });
     $('dlg-pagar').close();
@@ -523,7 +540,7 @@ $('pagar-confirmar').onclick = async () => {
     if (e.campos && e.campos.archivo) {            // archivo repetido o inválido: se vuelve al paso 1
       $('pagar-paso1').hidden = false; $('pagar-paso2').hidden = true;
       if (e.requiereJustificacion) { mostrarJust('pagar', e.message, e.campos.justificacion); return; }   // repetido: se acepta con justificación
-      $('pagar-archivo').value = ''; $('pagar-lista').innerHTML = ''; ocultarJust('pagar'); $('err-pagar-archivo').textContent = e.campos.archivo; return;
+      limpiarSeleccion('pagar'); ocultarJust('pagar'); $('err-pagar-archivo').textContent = e.campos.archivo; return;
     }
     $('pagar-error').textContent = e.red || !e.status || e.status >= 500 ? 'La operación no se completó. El pago sigue Pendiente y sin evidencia.' : e.message;
   } finally { b.disabled = false; }
@@ -533,13 +550,13 @@ $('pagar-confirmar').onclick = async () => {
 function abrirCambiar(p) {
   pagoActual = p; const usados = p.intentos_usados || 0; const rest = 3 - usados;
   $('cambiar-datos').innerHTML = datosPago(p) + dl([['Archivo vigente', esc(p.evidencia_nombre || 'Sin archivo')], ['Intentos usados', `${usados} de 3`], ['Intentos disponibles', String(rest)]]);
-  $('cambiar-archivo').value = ''; $('cambiar-lista').innerHTML = ''; ocultarJust('cambiar'); $('cambiar-coment').value = ''; limpiarErrores($('dlg-cambiar')); $('cambiar-error').textContent = '';
+  limpiarSeleccion('cambiar'); ocultarJust('cambiar'); $('cambiar-coment').value = ''; limpiarErrores($('dlg-cambiar')); $('cambiar-error').textContent = '';
   $('cambiar-paso1').hidden = false; $('cambiar-paso2').hidden = true;
   if (rest <= 0) return aviso('Cambio de evidencia', 'Se alcanzó el máximo de 3 intentos de cambio de evidencia para este pago.');
   $('dlg-cambiar').showModal(); animarContadores($('cambiar-datos'));
 }
 $('cambiar-continuar').onclick = () => {
-  limpiarErrores($('dlg-cambiar')); const a = [...$('cambiar-archivo').files]; const ea = validarArchivos(a);
+  limpiarErrores($('dlg-cambiar')); const a = [...seleccion.cambiar]; const ea = validarArchivos(a);
   if (ea) { $('err-cambiar-archivo').textContent = ea; return; }
   if (falloJust('cambiar')) return;
   const nombres = a.map((f) => `«${f.name}»`).join(', ');
@@ -550,13 +567,13 @@ $('cambiar-volver').onclick = () => { $('cambiar-paso1').hidden = false; $('camb
 $('cambiar-confirmar').onclick = async () => {
   const b = $('cambiar-confirmar'); b.disabled = true; $('cambiar-error').textContent = '';
   try {
-    const r = await enviarArchivos(`/api/pagos/${pagoActual.id}/evidencia`, $('cambiar-archivo').files, { ...cabJust('cambiar'), 'X-Comentario': encodeURIComponent($('cambiar-coment').value.trim()) });
+    const r = await enviarArchivos(`/api/pagos/${pagoActual.id}/evidencia`, seleccion.cambiar, { ...cabJust('cambiar'), 'X-Comentario': encodeURIComponent($('cambiar-coment').value.trim()) });
     $('dlg-cambiar').close(); aviso('Evidencia cambiada', `La evidencia se cambió correctamente. Te ${r.intentos_restantes === 1 ? 'queda 1 intento' : `quedan ${r.intentos_restantes} intentos`} de cambio.`); await refrescar();
   } catch (e) {
     if (!e.sesion && e.campos && e.campos.archivo) {
       $('cambiar-paso1').hidden = false; $('cambiar-paso2').hidden = true;
       if (e.requiereJustificacion) { mostrarJust('cambiar', e.message, e.campos.justificacion); return; }
-      $('cambiar-archivo').value = ''; $('cambiar-lista').innerHTML = ''; ocultarJust('cambiar'); $('err-cambiar-archivo').textContent = e.campos.archivo; return; }
+      limpiarSeleccion('cambiar'); ocultarJust('cambiar'); $('err-cambiar-archivo').textContent = e.campos.archivo; return; }
     if (!e.sesion) $('cambiar-error').textContent = e.red || !e.status || e.status >= 500 ? 'La operación no se completó. Se mantiene la evidencia actual.' : e.message; }
   finally { b.disabled = false; }
 };

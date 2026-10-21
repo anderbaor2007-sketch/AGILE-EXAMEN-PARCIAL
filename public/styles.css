@@ -338,3 +338,8 @@ dialog[open]::backdrop { animation: fundir .3s ease; background: rgba(6, 40, 29,
 .evid-lote { margin: 8px 0 4px; font-weight: 700; }
 .evid-arch { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 .evid-just { color: #9a3412; font-size: .9rem; }
+.arch-der { display: flex; align-items: center; gap: 10px; }
+.btn-x { border: 0; background: #fff; color: #b91c1c; width: 26px; height: 26px; border-radius: 50%; font-weight: 800; cursor: pointer; line-height: 1; box-shadow: 0 1px 3px rgba(0,0,0,.15); transition: transform .15s var(--ease), background .15s; }
+.btn-x:hover { background: #fee2e2; transform: scale(1.12); }
+.lista-arch li.total { background: #fff; }
+input[type=file]:disabled { opacity: .55; cursor: not-allowed; }
