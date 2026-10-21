@@ -5,7 +5,10 @@ const { query } = require('../db');
 
 // ---- Reglas de negocio (un solo lugar para ajustarlas) ----
 const DIAS_POR_VENCER = Number(process.env.DIAS_POR_VENCER || 3);     // HU-08: hoy y los próximos 3 días
-const MAX_BYTES = 5 * 1024 * 1024;                                    // HU-06/07: 5 MB
+const MAX_BYTES = 5 * 1024 * 1024;                                    // HU-06/07: 5 MB por archivo
+const MAX_ARCHIVOS = 3;                                               // hasta 3 archivos por evidencia
+const MAX_TOTAL = MAX_ARCHIVOS * MAX_BYTES;                           // 15 MB entre todos los archivos
+const MIN_JUSTIFICACION = 10;                                         // justificación de un archivo repetido
 const MAX_CAMBIOS_EVIDENCIA = 3;                                      // HU-07: máximo 3 intentos de cambio
 const DIAS_MAX_ATRAS_PAGO = 7;                                        // HU-06: el pago no puede ser anterior a 1 semana
 const LIMITE_MONTO = { Servicios: 20000, 'Préstamos': 2000000 };                            // HU-05: tope por categoría (S/)
@@ -50,9 +53,10 @@ const SELECT = `
          p.tipo_servicio, p.numero_recibo, p.codigo_suministro, p.ruc, p.razon_social, p.prestamo_id, p.numero_cuota, p.total_cuotas,
          p.metodo_pago, p.metodo_detalle, p.mora_pagada::float8 AS mora_pagada, pr.mora_tna::float8 AS mora_tna,
          p.congelado, p.motivo_congelado, to_char(p.congelado_en AT TIME ZONE 'America/Lima', 'DD/MM/YYYY HH24:MI') AS congelado_en,
-         c.nombre AS categoria, e.nombre_original AS evidencia_nombre, e.tipo_mime AS evidencia_tipo, (e.id IS NOT NULL) AS tiene_evidencia,
-         (SELECT count(*)::int FROM evidencias x WHERE x.pago_id = p.id AND NOT x.vigente) AS intentos_usados
-  FROM pagos p JOIN categorias c ON c.id = p.categoria_id LEFT JOIN prestamos pr ON pr.id = p.prestamo_id LEFT JOIN evidencias e ON e.pago_id = p.id AND e.vigente`;
+         c.nombre AS categoria, (SELECT string_agg(e.nombre_original, ', ' ORDER BY e.id) FROM evidencias e WHERE e.pago_id = p.id AND e.vigente) AS evidencia_nombre,
+         EXISTS (SELECT 1 FROM evidencias e WHERE e.pago_id = p.id AND e.vigente) AS tiene_evidencia,
+         (SELECT count(DISTINCT x.numero_intento)::int FROM evidencias x WHERE x.pago_id = p.id AND NOT x.vigente) AS intentos_usados
+  FROM pagos p JOIN categorias c ON c.id = p.categoria_id LEFT JOIN prestamos pr ON pr.id = p.prestamo_id`;
 
 // Mora = cuota × tasa nominal anual ÷ 360 × días de atraso (solo préstamos con mora)
 const calcMora = (monto, tna, diasAtraso) => (tna > 0 && diasAtraso > 0 ? redondeo(monto * (tna / 100) / DIAS_BASE_MORA * diasAtraso) : 0);
@@ -133,9 +137,10 @@ async function panel() {
   };
   // «Cambios de evidencia»: archivos reemplazados (intentos previos), el más reciente primero
   const cambios = await query(`
-    SELECT e.id AS evidencia_id, e.numero_intento, p.id AS pago_id, 'PAG-' || lpad(p.id::text, 4, '0') AS codigo, p.concepto, p.entidad,
-           to_char(e.reemplazada_en AT TIME ZONE 'America/Lima', 'DD/MM/YYYY HH24:MI') AS fecha_hora
-    FROM evidencias e JOIN pagos p ON p.id = e.pago_id WHERE NOT e.vigente ORDER BY e.reemplazada_en DESC LIMIT 30`);
+    SELECT min(e.id) AS evidencia_id, e.numero_intento, p.id AS pago_id, 'PAG-' || lpad(p.id::text, 4, '0') AS codigo, p.concepto, p.entidad,
+           count(*)::int AS archivos, to_char(max(e.reemplazada_en) AT TIME ZONE 'America/Lima', 'DD/MM/YYYY HH24:MI') AS fecha_hora
+    FROM evidencias e JOIN pagos p ON p.id = e.pago_id WHERE NOT e.vigente
+    GROUP BY p.id, e.numero_intento, p.concepto, p.entidad ORDER BY max(e.reemplazada_en) DESC LIMIT 30`);
   return { status: 200, json: { hoy: h, mes, hay_pagos: filas.length > 0, resumen, hoy_lista: hoyLista, pagados, pendientes, cambios } };
 }
 
@@ -314,24 +319,63 @@ function tipoReal(b) {
   if (b.length > 5 && b.subarray(0, 5).toString() === '%PDF-') return ['application/pdf', '.pdf'];
   return null;
 }
-function validarArchivo(buf, headers) {
-  if (!buf || !buf.length) return { e: err(400, 'Debes adjuntar la evidencia del pago.', { archivo: 'Adjunta la evidencia' }) };
-  if (buf.length > MAX_BYTES) return { e: err(413, 'El archivo no puede superar 5 MB.', { archivo: 'Máximo 5 MB' }) };
-  const tipo = tipoReal(buf);
-  if (!tipo) return { e: err(400, `El archivo tiene un formato no admitido. ${FORMATOS}`, { archivo: FORMATOS }) };
-  let nombre = 'evidencia' + tipo[1];
-  try { nombre = decodeURIComponent(headers['x-nombre'] || '').slice(0, 120) || nombre; } catch { /* nombre por defecto */ }
-  return { tipo, nombre, hash: crypto.createHash('sha256').update(buf).digest('hex') };
+// El cuerpo trae de 1 a 3 archivos pegados uno tras otro; la cabecera X-Archivos (JSON) indica el nombre y el tamaño de cada uno.
+function validarArchivos(buf, headers) {
+  const e400 = (msg) => ({ e: err(400, msg, { archivo: msg }) });
+  if (!buf || !buf.length) return e400('Debes adjuntar la evidencia del pago.');
+  let lista;
+  try { lista = headers['x-archivos'] ? JSON.parse(decodeURIComponent(headers['x-archivos'])) : null; } catch { return e400('La lista de archivos no es válida.'); }
+  if (!lista) {                                       // sin lista: un solo archivo (compatibilidad)
+    let nombre = null; try { nombre = decodeURIComponent(headers['x-nombre'] || '').slice(0, 120) || null; } catch { /* sin nombre */ }
+    lista = [{ n: nombre, t: buf.length }];
+  }
+  if (!Array.isArray(lista) || !lista.length) return e400('Debes adjuntar la evidencia del pago.');
+  if (lista.length > MAX_ARCHIVOS) return e400(`Puedes subir como máximo ${MAX_ARCHIVOS} archivos.`);
+  if (lista.some((x) => !Number.isInteger(x.t) || x.t <= 0) || lista.reduce((s, x) => s + x.t, 0) !== buf.length) return e400('Los archivos recibidos no coinciden con lo indicado.');
+  if (buf.length > MAX_TOTAL) return { e: err(413, `Entre los ${MAX_ARCHIVOS} archivos no pueden superar 15 MB.`, { archivo: 'Máximo 15 MB entre todos los archivos' }) };
+  const archivos = []; let pos = 0;
+  for (const x of lista) {
+    const datos = buf.subarray(pos, pos + x.t); pos += x.t;
+    const tipo = tipoReal(datos);
+    const nombre = String(x.n || '').slice(0, 120) || `evidencia${tipo ? tipo[1] : ''}`;
+    if (datos.length > MAX_BYTES) return { e: err(413, `«${nombre}» supera 5 MB. Cada archivo puede pesar máximo 5 MB.`, { archivo: 'Cada archivo máximo 5 MB' }) };
+    if (!tipo) return e400(`«${nombre}» tiene un formato no admitido. ${FORMATOS}`);
+    archivos.push({ datos, nombre, tipo: tipo[0], hash: crypto.createHash('sha256').update(datos).digest('hex') });
+  }
+  for (let i = 0; i < archivos.length; i++) for (let j = i + 1; j < archivos.length; j++) {
+    if (archivos[i].hash === archivos[j].hash) return e400(`«${archivos[i].nombre}» y «${archivos[j].nombre}» son el mismo archivo. Elige archivos distintos.`);
+  }
+  return { archivos };
 }
-// Un mismo archivo (mismos bytes) no puede usarse como evidencia dos veces: ni en otro pago ni en otro intento del mismo pago.
-async function archivoRepetido(hash, pagoId) {
-  const [d] = await query(`SELECT pago_id, vigente, 'PAG-' || lpad(pago_id::text, 4, '0') AS codigo FROM evidencias WHERE hash = $1 ORDER BY (pago_id = $2) DESC LIMIT 1`, [hash, pagoId]);
-  if (!d) return null;
-  const msg = d.pago_id === pagoId
-    ? (d.vigente ? 'Este archivo es igual a la evidencia vigente de este pago. Sube un archivo distinto.' : 'Este archivo es igual a un intento anterior de este pago. Sube un archivo distinto.')
-    : `Este archivo ya fue usado como evidencia del pago ${d.codigo}. Cada pago debe tener su propia evidencia.`;
-  return err(409, msg, { archivo: msg });
+// Un archivo que ya se subió antes (otro pago, la evidencia vigente o un intento anterior) solo se acepta con una justificación escrita.
+async function revisarRepetidos(archivos, pagoId, headers) {
+  const marcas = archivos.map((_, i) => `$${i + 2}`).join(',');
+  const previos = await query(`SELECT hash, pago_id, vigente, 'PAG-' || lpad(pago_id::text, 4, '0') AS codigo FROM evidencias WHERE hash IN (${marcas}) ORDER BY (pago_id = $1) DESC, id`, [pagoId, ...archivos.map((a) => a.hash)]);
+  const detalles = [];
+  for (const a of archivos) {
+    const d = previos.find((x) => x.hash === a.hash);
+    a.justificacion = null;
+    if (d) detalles.push(`«${a.nombre}» ` + (d.pago_id === pagoId ? (d.vigente ? 'ya es evidencia vigente de este pago' : 'ya se subió como intento anterior de este pago') : `ya fue usado como evidencia del pago ${d.codigo}`));
+  }
+  if (!detalles.length) return null;
+  let just = ''; try { just = decodeURIComponent(headers['x-justificacion'] || '').trim(); } catch { just = ''; }
+  if (just.length < MIN_JUSTIFICACION || just.length > 300) {
+    const msg = `${detalles.join('; ')}. Para volver a subirlo escribe la justificación.`;
+    const campo = just ? `La justificación debe tener entre ${MIN_JUSTIFICACION} y 300 caracteres` : 'Escribe por qué vuelves a subir este archivo';
+    return { status: 409, json: { error: msg, campos: { archivo: msg, justificacion: campo }, requiere_justificacion: true, repetidos: detalles } };
+  }
+  for (const a of archivos) if (previos.some((x) => x.hash === a.hash)) a.justificacion = just;
+  return null;
 }
+// Arma el INSERT de varios archivos (una fila por archivo) a partir del parámetro numero `desde`.
+function filasEvidencia(archivos, desde, origen, pagoCol, usuarioParam, comentarioParam, vigente) {
+  const params = []; const sels = archivos.map((a, i) => {
+    const b = desde + i * 5; params.push(a.datos, a.nombre, a.tipo, a.hash, a.justificacion);
+    return `SELECT ${pagoCol}, $${b}::bytea, $${b + 1}::text, $${b + 2}::text, ${usuarioParam}::int, ${vigente}, ${comentarioParam}::text, $${b + 3}::text, $${b + 4}::text FROM ${origen}`;
+  });
+  return { sql: sels.join(' UNION ALL '), params };
+}
+const COLS_EVID = 'pago_id, datos, nombre_original, tipo_mime, subido_por, vigente, comentario, hash, justificacion';
 
 // ---------- HU-06: registrar pago como realizado (fecha + hora + comentario + evidencia en UNA operación) ----------
 // PUT /api/pagos/:id/pagar — cuerpo: el archivo; cabeceras: X-Fecha-Pago, X-Hora-Pago, X-Comentario, X-Nombre
@@ -358,21 +402,21 @@ async function pagar({ params, bodyCrudo, headers, usuario }) {
   if (!permitidos[metodo]) return err(400, p.categoria === 'Préstamos' ? 'Para préstamos solo se paga con transferencia (cuenta bancaria) o tarjeta de crédito.' : 'Método de pago inválido.', { metodo_pago: 'Método de pago inválido' });
   if (permitidos[metodo].length && !permitidos[metodo].includes(detalle)) return err(400, 'Completa el método de pago.', { metodo_detalle: metodo === 'BILLETERA' ? 'Selecciona Plin, Yape o Agora' : 'Selecciona crédito o débito' });
   if (!permitidos[metodo].length && detalle) return err(400, 'Método de pago inválido.', { metodo_pago: 'Método de pago inválido' });
-  const v = validarArchivo(bodyCrudo, headers); if (v.e) return v.e;
-  const rep = await archivoRepetido(v.hash, p.id); if (rep) return rep;
+  const v = validarArchivos(bodyCrudo, headers); if (v.e) return v.e;
+  const rep = await revisarRepetidos(v.archivos, p.id, headers); if (rep) return rep;
   const mora = calcMora(p.monto, p.mora_tna || 0, diasEntre(p.fecha_vencimiento, fecha));   // mora hasta la fecha de pago (solo préstamos atrasados)
 
-  // Un solo comando SQL = operación atómica: o pasa a PAGADO con su evidencia, o no pasa nada.
+  // Un solo comando SQL = operación atómica: o pasa a PAGADO con todos sus archivos, o no pasa nada.
+  const f = filasEvidencia(v.archivos, 9, 'u', 'id', '$5', '$4', 'true');
   const r = await query(`
     WITH u AS (
-      UPDATE pagos SET estado='PAGADO', fecha_pago=$2, hora_pago=$3, comentario=$4, pagado_por=$5, metodo_pago=$9, metodo_detalle=$10, mora_pagada=$11
-      WHERE id=$1 AND estado='PENDIENTE' AND NOT congelado AND NOT EXISTS (SELECT 1 FROM evidencias WHERE hash=$12) RETURNING id
+      UPDATE pagos SET estado='PAGADO', fecha_pago=$2, hora_pago=$3, comentario=$4, pagado_por=$5, metodo_pago=$6, metodo_detalle=$7, mora_pagada=$8
+      WHERE id=$1 AND estado='PENDIENTE' AND NOT congelado RETURNING id
     )
-    INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, comentario, hash)
-    SELECT id, $6, $7, $8, $5, $4, $12 FROM u RETURNING pago_id`,
-    [p.id, fecha, hora, comentario, usuario.id, bodyCrudo, v.nombre, v.tipo[0], metodo, detalle, mora, v.hash]);
+    INSERT INTO evidencias (${COLS_EVID}) ${f.sql} RETURNING pago_id`,
+    [p.id, fecha, hora, comentario, usuario.id, metodo, detalle, mora, ...f.params]);
   if (!r.length) return err(409, 'Solo se puede registrar como realizado un pago Pendiente.');
-  return { status: 200, json: { ok: true, concepto: p.concepto, fecha_pago: fecha, hora_pago: hora, archivo: v.nombre, metodo_texto: metodoTexto(metodo, detalle), mora, total: redondeo(p.monto + mora) } };
+  return { status: 200, json: { ok: true, concepto: p.concepto, fecha_pago: fecha, hora_pago: hora, archivos: v.archivos.map((x) => x.nombre), metodo_texto: metodoTexto(metodo, detalle), mora, total: redondeo(p.monto + mora) } };
 }
 
 // ---------- HU-07: cambiar la evidencia (máx. 3 intentos; el archivo reemplazado queda como intento previo) ----------
@@ -380,33 +424,32 @@ async function cambiarEvidencia({ params, bodyCrudo, headers, usuario }) {
   const [p] = await query('SELECT id, estado, monto::float8 AS monto FROM pagos WHERE id = $1', [params.id]);
   if (!p) return err(404, 'Pago no encontrado');
   if (p.estado !== 'PAGADO') return err(409, 'Solo se puede cambiar la evidencia de un pago Pagado.');
-  const [{ usados }] = await query('SELECT count(*)::int AS usados FROM evidencias WHERE pago_id = $1 AND NOT vigente', [p.id]);
+  const [{ usados }] = await query('SELECT count(DISTINCT numero_intento)::int AS usados FROM evidencias WHERE pago_id = $1 AND NOT vigente', [p.id]);
   if (usados >= MAX_CAMBIOS_EVIDENCIA) return err(409, `Se alcanzó el máximo de ${MAX_CAMBIOS_EVIDENCIA} intentos de cambio de evidencia.`);
   let comentario = null;
   try { comentario = decodeURIComponent(headers['x-comentario'] || '').trim() || null; } catch { comentario = null; }
   if (comentario && comentario.length > 300) return err(400, 'El comentario no puede superar 300 caracteres.', { comentario: 'Máximo 300 caracteres' });
-  const v = validarArchivo(bodyCrudo, headers); if (v.e) return v.e;
-  const rep = await archivoRepetido(v.hash, p.id); if (rep) return rep;
+  const v = validarArchivos(bodyCrudo, headers); if (v.e) return v.e;
+  const rep = await revisarRepetidos(v.archivos, p.id, headers); if (rep) return rep;
 
   const [{ vig }] = await query('SELECT count(*)::int AS vig FROM evidencias WHERE pago_id = $1 AND vigente', [p.id]);
   let r;
   if (!vig) {
-    // Pago Pagado que (por datos antiguos) no tiene archivo vigente: el nuevo pasa a ser la evidencia vigente, sin gastar un intento.
-    r = await query('INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, vigente, comentario, hash) VALUES ($1,$2,$3,$4,$5,true,$6,$7) RETURNING pago_id',
-      [p.id, bodyCrudo, v.nombre, v.tipo[0], usuario.id, comentario, v.hash]);
+    // Pago Pagado que (por datos antiguos) no tiene archivo vigente: los nuevos pasan a ser la evidencia vigente, sin gastar un intento.
+    const g = filasEvidencia(v.archivos, 4, '(SELECT 1) z', '$1::int', '$2', '$3', 'true');
+    r = await query(`INSERT INTO evidencias (${COLS_EVID}) ${g.sql} RETURNING pago_id`, [p.id, usuario.id, comentario, ...g.params]);
     if (r.length) return { status: 200, json: { ok: true, intentos_restantes: MAX_CAMBIOS_EVIDENCIA - usados, sin_vigente: true } };
   }
-  // Un solo comando: archiva la vigente (con su número de intento y hora) y deja la nueva como vigente.
+  // Un solo comando: archiva TODOS los archivos vigentes (mismo número de intento y hora) y deja los nuevos como vigentes.
+  const g = filasEvidencia(v.archivos, 4, '(SELECT DISTINCT pago_id FROM u) s', 's.pago_id', '$2', '$3', 'true');
   r = await query(`
     WITH u AS (
-      UPDATE evidencias SET vigente = false, numero_intento = (SELECT count(*) FROM evidencias WHERE pago_id = $1 AND NOT vigente) + 1, reemplazada_en = now()
-      WHERE pago_id = $1 AND vigente AND (SELECT count(*) FROM evidencias WHERE pago_id = $1 AND NOT vigente) < ${MAX_CAMBIOS_EVIDENCIA}
-        AND NOT EXISTS (SELECT 1 FROM evidencias WHERE hash = $7)
+      UPDATE evidencias SET vigente = false, numero_intento = (SELECT count(DISTINCT numero_intento) FROM evidencias WHERE pago_id = $1 AND NOT vigente) + 1, reemplazada_en = now()
+      WHERE pago_id = $1 AND vigente AND (SELECT count(DISTINCT numero_intento) FROM evidencias WHERE pago_id = $1 AND NOT vigente) < ${MAX_CAMBIOS_EVIDENCIA}
       RETURNING pago_id
     )
-    INSERT INTO evidencias (pago_id, datos, nombre_original, tipo_mime, subido_por, vigente, comentario, hash)
-    SELECT pago_id, $2, $3, $4, $5, true, $6, $7 FROM u RETURNING pago_id`,
-    [p.id, bodyCrudo, v.nombre, v.tipo[0], usuario.id, comentario, v.hash]);
+    INSERT INTO evidencias (${COLS_EVID}) ${g.sql} RETURNING pago_id`,
+    [p.id, usuario.id, comentario, ...g.params]);
   if (!r.length) return err(409, 'No fue posible cambiar la evidencia de este pago.');
   return { status: 200, json: { ok: true, intentos_restantes: MAX_CAMBIOS_EVIDENCIA - (usados + 1) } };
 }
@@ -463,12 +506,12 @@ async function infoEvidencias({ params }) {
   if (!p) return err(404, 'Pago no encontrado');
   if (p.estado === 'PENDIENTE') return err(409, 'Este pago aún no tiene evidencia porque no se ha registrado como realizado.');
   const archivos = await query(`
-    SELECT id, vigente, numero_intento, nombre_original AS nombre, tipo_mime AS tipo, comentario,
+    SELECT id, vigente, numero_intento, nombre_original AS nombre, tipo_mime AS tipo, comentario, justificacion,
            to_char(reemplazada_en AT TIME ZONE 'America/Lima', 'DD/MM/YYYY HH24:MI') AS reemplazada_en
-    FROM evidencias WHERE pago_id = $1 ORDER BY vigente DESC, numero_intento DESC`, [p.id]);
+    FROM evidencias WHERE pago_id = $1 ORDER BY vigente DESC, numero_intento DESC, id`, [p.id]);
   if (!archivos.length) return err(404, 'Este pago no tiene evidencia.');
   const { id, codigo, concepto, entidad, monto, fecha_pago, hora_pago, comentario } = p; const q = conAlerta(p);
-  return { status: 200, json: { pago: { id, codigo, concepto, entidad, monto, fecha_pago, hora_pago, comentario, categoria: p.categoria, detalle: q.detalle, metodo_texto: q.metodo_texto, mora: q.mora, total: q.total }, vigente: archivos.find((a) => a.vigente), previos: archivos.filter((a) => !a.vigente) } };
+  return { status: 200, json: { pago: { id, codigo, concepto, entidad, monto, fecha_pago, hora_pago, comentario, categoria: p.categoria, detalle: q.detalle, metodo_texto: q.metodo_texto, mora: q.mora, total: q.total }, vigente: archivos.find((a) => a.vigente), vigentes: archivos.filter((a) => a.vigente), previos: archivos.filter((a) => !a.vigente) } };
 }
 // GET /api/evidencias/:id[?descargar=1] — ver o descargar un archivo (vigente o intento previo)
 async function verArchivo({ params, query: qs }) {
@@ -477,4 +520,4 @@ async function verArchivo({ params, query: qs }) {
   return { status: 200, buffer: e.datos, tipo: e.tipo_mime, nombre: e.nombre_original, descargar: qs.get('descargar') === '1' };
 }
 
-module.exports = { congelar, descongelar, detalle, listar, panel, porVencer, categorias, verificar, crear, pagar, cambiarEvidencia, infoEvidencias, verArchivo, MAX_BYTES };
+module.exports = { congelar, descongelar, detalle, listar, panel, porVencer, categorias, verificar, crear, pagar, cambiarEvidencia, infoEvidencias, verArchivo, MAX_BYTES: MAX_TOTAL };

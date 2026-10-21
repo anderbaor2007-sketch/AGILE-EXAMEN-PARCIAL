@@ -29,12 +29,12 @@ Pruebas (una por historia de usuario; usar una base **de prueba vacía**, se bor
 | HU-08 Pagos por vencer | `GET /api/pagos/por-vencer` (hoy + 3 días y atrasados) |
 | Congelar pagos (gerente) | `POST /api/pagos/:id/congelar` y `/descongelar` (solo GERENTE; columnas `congelado`, `motivo_congelado`) |
 | Pago atrasado (asistente) | `POST /api/pagos` con `atrasado:true` (`validarVencimiento`) |
-| Evidencias únicas | hash SHA-256 en `evidencias.hash` (`archivoRepetido`) |
+| Evidencias (hasta 3 archivos; repetidos con justificación) | hash SHA-256 en `evidencias.hash`, `validarArchivos` y `revisarRepetidos` |
 | HU-09 Avisos | diálogo al iniciar sesión (solo asistente), calculado desde `por-vencer` |
 
 ## Reglas de negocio (constantes en `src/handlers/pagos.js`)
 - Límite de monto: Servicios S/ 20 000; Proveedores e Impuestos S/ 500 000; Préstamos S/ 2 000 000 (`LIMITE_MONTO`). Al excederlo: «El monto no puede exceder los … soles».
-- Fecha de pago: no posterior a ahora y no anterior a 7 días (`DIAS_MAX_ATRAS_PAGO`). Evidencia: JPG/PNG/PDF, máx. 5 MB, máx. 3 cambios.
+- Fecha de pago: no posterior a ahora y no anterior a 7 días (`DIAS_MAX_ATRAS_PAGO`). Evidencia: de 1 a 3 archivos JPG/PNG/PDF por pago (máx. 5 MB cada uno y 15 MB en total); máx. 3 cambios (cada cambio reemplaza el conjunto completo).
 - Mes actual: pagos que vencen en el mes **+** pendientes de meses anteriores (*Atrasado*). Otros meses: solo los que vencen en ese mes.
 - Pago repetido: misma entidad + categoría + concepto + mismo mes de vencimiento → aviso, el asistente puede confirmar o cancelar.
 - Formulario por categoría (se elige primero): **Servicios** (Agua/Luz/Internet; Luz y Agua piden código de suministro; N.º de recibo), **Proveedores** (RUC de 11 dígitos + razón social), **Impuestos** (SUNAT: IGV o Impuesto a la renta; SAT: predial o vehicular) y **Préstamos**.
@@ -46,5 +46,5 @@ Pruebas (una por historia de usuario; usar una base **de prueba vacía**, se bor
 - La base se crea sin pagos. Para vaciarla en cualquier momento: `limpiar-datos.sql` (SQL Editor de Neon).
 - Estado visible de cada pago: Pendiente, Pagado, Atrasado o Congelado. El gerente puede congelar/descongelar cualquier pago pendiente (motivo opcional, máx. 200 caracteres); un pago congelado no se puede pagar, no genera mora ni aparece en «por vencer».
 - Pago atrasado: el asistente marca «Es un pago atrasado»; el vencimiento debe ser anterior a hoy (hasta 12 meses atrás). Solo Servicios, Proveedores e Impuestos (no Préstamos).
-- Evidencias únicas: no se acepta un archivo idéntico (mismo contenido) al de otro pago, al vigente ni a intentos anteriores del mismo pago (409). Solo detecta archivos idénticos byte a byte.
+- Evidencias: hasta 3 archivos por envío (5 MB c/u, 15 MB en total). Un archivo idéntico (mismo contenido) a uno ya subido —en otro pago, la evidencia vigente o un intento anterior— solo se acepta con una justificación escrita (10–300 caracteres), que queda guardada y visible para el gerente. El mismo archivo dos veces en un mismo envío se rechaza siempre. Solo detecta archivos idénticos byte a byte.
 - Tema visual verde oscuro y blanco, con animaciones (contadores que suben desde 0, entradas suaves); respeta «reducir movimiento» del sistema.

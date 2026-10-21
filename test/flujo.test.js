@@ -36,9 +36,14 @@ const crear = async (o) => {
 // Cada archivo de prueba debe ser distinto (el sistema rechaza archivos repetidos): se le añade un sufijo único. Con { exacto: true } se envía tal cual.
 let contadorArchivo = 0;
 const unico = (b, exacto) => (Buffer.isBuffer(b) && !exacto && b.length < 1_000_000 ? Buffer.concat([b, Buffer.from(` #${++contadorArchivo}-${Math.random()}`)]) : b);
-const pagarCon = (id, archivo, extra = {}) => pedir(asistente, 'PUT', `/api/pagos/${id}/pagar`, unico(archivo, extra.exacto),
-  { 'X-Fecha-Pago': hoy(), 'X-Hora-Pago': '00:00', 'X-Nombre': 'boleta.png', 'X-Metodo-Pago': 'EFECTIVO', ...extra });
-const cambiarCon = (id, archivo, exacto) => pedir(asistente, 'PUT', `/api/pagos/${id}/evidencia`, unico(archivo, exacto), { 'X-Nombre': 'nueva.png' });
+// Evidencia: de 1 a 3 archivos pegados en el cuerpo; la cabecera X-Archivos indica nombre y tamaño de cada uno.
+const empaquetar = (archivos, exacto) => {
+  const lista = (Array.isArray(archivos) ? archivos : [archivos]).map((b) => unico(b, exacto)); const cuerpo = Buffer.concat(lista);
+  return { cuerpo, cab: cuerpo.length ? { 'X-Archivos': encodeURIComponent(JSON.stringify(lista.map((b, i) => ({ n: `archivo${i + 1}.png`, t: b.length })))) } : {} };
+};
+const pagarCon = (id, archivo, extra = {}) => { const { exacto, ...resto } = extra; const e = empaquetar(archivo, exacto);
+  return pedir(asistente, 'PUT', `/api/pagos/${id}/pagar`, e.cuerpo, { 'X-Fecha-Pago': hoy(), 'X-Hora-Pago': '00:00', 'X-Metodo-Pago': 'EFECTIVO', ...e.cab, ...resto }); };
+const cambiarCon = (id, archivo, exacto, extra = {}) => { const e = empaquetar(archivo, exacto); return pedir(asistente, 'PUT', `/api/pagos/${id}/evidencia`, e.cuerpo, { ...e.cab, ...extra }); };
 const idPor = async (c) => (await query('SELECT id FROM pagos WHERE concepto = $1', [c]))[0].id;
 
 test.before(async () => {
@@ -225,7 +230,7 @@ test('Ver detalles: todos los datos del pago y, en préstamos, todas sus cuotas 
   // Pagado: método, quién pagó, comentario, evidencia
   assert.equal((await pagarCon(sv.json.id, PNG, { 'X-Metodo-Pago': 'BILLETERA', 'X-Metodo-Detalle': 'PLIN', 'X-Comentario': encodeURIComponent('ok') })).status, 200);
   const pg = (await pedir(gerente, 'GET', `/api/pagos/${sv.json.id}/detalle`)).json.pago;
-  assert.equal(pg.estado, 'PAGADO'); assert.equal(pg.metodo_texto, 'Billetera digital (Plin)'); assert.equal(pg.comentario, 'ok'); assert.equal(pg.evidencia_nombre, 'boleta.png'); assert.ok(pg.pagado_por_nombre);
+  assert.equal(pg.estado, 'PAGADO'); assert.equal(pg.metodo_texto, 'Billetera digital (Plin)'); assert.equal(pg.comentario, 'ok'); assert.equal(pg.evidencia_nombre, 'archivo1.png'); assert.ok(pg.pagado_por_nombre);
   // Préstamo: todas las cuotas
   const rp = await pedir(asistente, 'POST', '/api/pagos', { categoria_id: 4, entidad: 'Scotiabank', monto_total: '900', num_cuotas: '3', mora_tna: '12', fecha_primera_cuota: mas(3), fecha_vencimiento_total: mesesMas(mas(3), 2) });
   assert.equal(rp.status, 201);
@@ -470,20 +475,40 @@ test('Pago atrasado: se puede registrar con vencimiento anterior a hoy (y solo s
   assert.equal((await pagarCon(ok.json.id, PNG)).status, 200);                                            // se puede pagar normalmente
 });
 
-test('Evidencias: no se aceptan archivos repetidos (en otro pago ni en intentos del mismo pago)', async () => {
+test('Evidencias: hasta 3 archivos y los repetidos solo con justificación', async () => {
   const a = (await crear({ concepto: 'Dup A', numero_recibo: 'R-DA' })).json.id; const b = (await crear({ concepto: 'Dup B', numero_recibo: 'R-DB' })).json.id;
   const f1 = Buffer.concat([PNG, Buffer.from('archivo-uno')]); const f2 = Buffer.concat([PNG, Buffer.from('archivo-dos')]); const f3 = Buffer.concat([JPG, Buffer.from('archivo-tres')]);
-  assert.equal((await pagarCon(a, f1, { exacto: true })).status, 200);
-  // mismo archivo en otro pago -> rechazado, el pago sigue Pendiente
-  const r = await pagarCon(b, f1, { exacto: true }); assert.equal(r.status, 409); assert.match(r.json.error, /ya fue usado como evidencia del pago PAG-/);
+  // máximo 3 archivos por evidencia
+  const cuatro = await pagarCon(a, [PNG, PNG, PNG, PNG]); assert.equal(cuatro.status, 400); assert.match(cuatro.json.error, /máximo 3 archivos/);
+  assert.equal((await query('SELECT estado FROM pagos WHERE id=$1', [a]))[0].estado, 'PENDIENTE');
+  // el mismo archivo dos veces en un mismo envío: siempre rechazado (no hay justificación que valga)
+  const mismo = await pagarCon(a, [f1, f1], { exacto: true, 'X-Justificacion': encodeURIComponent('es la misma foto dos veces') }); assert.equal(mismo.status, 400); assert.match(mismo.json.error, /mismo archivo/);
+  // un archivo no válido dentro del grupo rechaza todo
+  assert.equal((await pagarCon(a, [PNG, Buffer.from('MZ ejecutable')])).status, 400);
+  // un archivo de más de 5 MB entre los 3 -> rechazado
+  assert.equal((await pagarCon(a, [PNG, Buffer.concat([JPG, Buffer.alloc(5 * 1024 * 1024)])])).status, 413);
+  // 3 archivos distintos -> pago correcto con 3 evidencias vigentes
+  assert.equal((await pagarCon(a, [f1, f2, f3], { exacto: true })).status, 200);
+  assert.equal((await query('SELECT count(*)::int n FROM evidencias WHERE pago_id=$1 AND vigente', [a]))[0].n, 3);
+  const ig = (await pedir(gerente, 'GET', `/api/pagos/${a}/evidencias`)).json; assert.equal(ig.vigentes.length, 3);
+  // archivo ya usado en otro pago -> pide justificación y el pago sigue Pendiente
+  let r = await pagarCon(b, f1, { exacto: true }); assert.equal(r.status, 409); assert.equal(r.json.requiere_justificacion, true);
+  assert.match(r.json.error, /ya fue usado como evidencia del pago PAG-/); assert.ok(r.json.campos.justificacion);
   assert.equal((await query('SELECT estado FROM pagos WHERE id=$1', [b]))[0].estado, 'PENDIENTE');
-  assert.equal((await pagarCon(b, f2, { exacto: true })).status, 200);
-  // cambiar la evidencia por la misma vigente / por la de otro pago -> rechazado y no cuenta intento
-  let c = await cambiarCon(a, f1, true); assert.equal(c.status, 409); assert.match(c.json.error, /igual a la evidencia vigente/);
-  c = await cambiarCon(a, f2, true); assert.equal(c.status, 409); assert.match(c.json.error, /ya fue usado como evidencia del pago/);
+  // justificación demasiado corta -> sigue rechazado
+  r = await pagarCon(b, f1, { exacto: true, 'X-Justificacion': encodeURIComponent('corta') }); assert.equal(r.status, 409);
+  // con justificación suficiente -> se acepta y queda guardada
+  r = await pagarCon(b, [f1, Buffer.concat([PNG, Buffer.from('nuevo-b')])], { exacto: true, 'X-Justificacion': encodeURIComponent('El mismo voucher cubre dos pagos') }); assert.equal(r.status, 200);
+  const just = await query('SELECT justificacion FROM evidencias WHERE pago_id=$1 ORDER BY id', [b]);
+  assert.equal(just[0].justificacion, 'El mismo voucher cubre dos pagos'); assert.equal(just[1].justificacion, null);   // solo el repetido lleva justificación
+  // cambiar evidencia: repetir la vigente o un intento anterior también pide justificación y no gasta intento
+  let c = await cambiarCon(a, f1, true); assert.equal(c.status, 409); assert.match(c.json.error, /ya es evidencia vigente de este pago/);
   assert.equal((await query('SELECT count(*)::int n FROM evidencias WHERE pago_id=$1 AND NOT vigente', [a]))[0].n, 0);
-  assert.equal((await cambiarCon(a, f3, true)).status, 200);                                              // uno distinto sí
-  // volver a subir el intento anterior (f1) -> rechazado
-  c = await cambiarCon(a, f1, true); assert.equal(c.status, 409); assert.match(c.json.error, /igual a un intento anterior/);
-  assert.equal((await query('SELECT count(*)::int n FROM evidencias WHERE pago_id=$1 AND NOT vigente', [a]))[0].n, 1);
+  c = await cambiarCon(a, [f1, f3], true, { 'X-Justificacion': encodeURIComponent('Se corrige el orden de las fotos') }); assert.equal(c.status, 200); assert.equal(c.json.intentos_restantes, 2);
+  // el cambio archiva el conjunto completo (3 archivos) como UN intento
+  assert.equal((await query('SELECT count(*)::int n FROM evidencias WHERE pago_id=$1 AND NOT vigente AND numero_intento=1', [a]))[0].n, 3);
+  assert.equal((await query('SELECT count(*)::int n FROM evidencias WHERE pago_id=$1 AND vigente', [a]))[0].n, 2);
+  c = await cambiarCon(a, f2, true); assert.equal(c.status, 409); assert.match(c.json.error, /intento anterior|ya es evidencia vigente|ya fue usado/);
+  c = await cambiarCon(a, f2, true, { 'X-Justificacion': encodeURIComponent('Era la foto correcta') }); assert.equal(c.status, 200); assert.equal(c.json.intentos_restantes, 1);
+  const panel = (await pedir(gerente, 'GET', '/api/panel')).json; assert.ok(panel.cambios.some((x) => x.pago_id === a && x.archivos === 3));
 });

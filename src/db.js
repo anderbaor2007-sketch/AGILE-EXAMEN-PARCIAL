@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS pagos (
 CREATE INDEX IF NOT EXISTS ix_pagos_venc ON pagos(fecha_vencimiento);
 
 -- Evidencia = recibo/boleta (JPG, PNG o PDF), guardada DENTRO de la base.
--- Cada pago tiene UNA evidencia vigente y hasta 3 intentos previos (archivos reemplazados), que no se eliminan.
+-- Cada pago tiene su evidencia vigente (de 1 a 3 archivos) y hasta 3 intentos previos (conjuntos reemplazados), que no se eliminan.
 CREATE TABLE IF NOT EXISTS evidencias (
   id              SERIAL PRIMARY KEY,
   pago_id         INT NOT NULL REFERENCES pagos(id) ON DELETE CASCADE,
@@ -71,7 +71,8 @@ ALTER TABLE evidencias DROP CONSTRAINT IF EXISTS evidencias_pago_id_key;
 ALTER TABLE evidencias ADD COLUMN IF NOT EXISTS vigente BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE evidencias ADD COLUMN IF NOT EXISTS numero_intento INT;
 ALTER TABLE evidencias ADD COLUMN IF NOT EXISTS reemplazada_en TIMESTAMPTZ;
-CREATE UNIQUE INDEX IF NOT EXISTS ux_evidencia_vigente ON evidencias(pago_id) WHERE vigente;
+DROP INDEX IF EXISTS ux_evidencia_vigente;                                           -- ahora un pago puede tener hasta 3 archivos vigentes
+ALTER TABLE evidencias ADD COLUMN IF NOT EXISTS justificacion TEXT;                    -- por qué se subió un archivo repetido
 
 ALTER TABLE evidencias ADD COLUMN IF NOT EXISTS comentario TEXT;   -- comentario del asistente al subir/cambiar la evidencia
 ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS sesion_id TEXT;   -- sesión vigente: un solo inicio de sesión activo por usuario

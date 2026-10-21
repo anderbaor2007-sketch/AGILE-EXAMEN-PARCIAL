@@ -9,6 +9,7 @@ const MAX_BYTES = 5 * 1024 * 1024;
 const TIPOS = ['image/jpeg', 'image/png', 'application/pdf'];
 const MSG_FORMATOS = 'Formato no admitido. Formatos admitidos: JPG, PNG o PDF.';
 const MSG_TAMANO = 'El archivo no puede superar 5 MB.';
+const MAX_ARCHIVOS = 3, MAX_TOTAL = 3 * MAX_BYTES;   // hasta 3 archivos, 15 MB entre todos
 const TZ = 'America/Lima';
 const fechaLima = (d = new Date()) => d.toLocaleDateString('en-CA', { timeZone: TZ });
 const horaLima = () => new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
@@ -24,12 +25,13 @@ async function api(url, opciones = {}) {
   try { r = await fetch(url, opciones); } catch { throw Object.assign(new Error('Sin conexión'), { red: true }); }
   const datos = await r.json().catch(() => ({}));
   if (r.status === 401 && url !== '/api/login') { mostrarLogin(datos.reemplazada ? datos.error : ''); throw Object.assign(new Error('Sesión expirada'), { sesion: true }); }
-  if (!r.ok) throw Object.assign(new Error(datos.error || 'Error'), { campos: datos.campos, status: r.status });
+  if (!r.ok) throw Object.assign(new Error(datos.error || 'Error'), { campos: datos.campos, status: r.status, requiereJustificacion: !!datos.requiere_justificacion });
   return datos;
 }
 const enviarJson = (url, metodo, cuerpo) => api(url, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
-const enviarArchivo = (url, archivo, extra = {}) => api(url, { method: 'PUT', body: archivo,
-  headers: { 'Content-Type': archivo.type || 'application/octet-stream', 'X-Nombre': encodeURIComponent(archivo.name), ...extra } });
+// Envía de 1 a 3 archivos en un solo cuerpo; X-Archivos indica nombre y tamaño de cada uno.
+const enviarArchivos = (url, archivos, extra = {}) => { const lista = [...archivos];
+  return api(url, { method: 'PUT', body: new Blob(lista), headers: { 'Content-Type': 'application/octet-stream', 'X-Archivos': encodeURIComponent(JSON.stringify(lista.map((f) => ({ n: f.name, t: f.size })))), ...extra } }); };
 
 function aviso(titulo, texto, extra) {
   $('msg-titulo').textContent = titulo; $('msg-texto').textContent = texto;
@@ -54,6 +56,30 @@ function animarContadores(raiz = document) {
 const dl = (pares) => pares.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
 document.querySelectorAll('[data-cerrar]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); b.closest('dialog').close(); }));
 $('msg-ok').onclick = () => $('dlg-msg').close();
+const tamanoTxt = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.ceil(n / 1024))} KB`);
+function validarArchivos(fs) {
+  const l = [...fs];
+  if (!l.length) return 'Debes adjuntar la evidencia del pago.';
+  if (l.length > MAX_ARCHIVOS) return `Puedes subir como máximo ${MAX_ARCHIVOS} archivos.`;
+  for (const f of l) { const e = validarArchivo(f); if (e) return `«${f.name}»: ${e}`; }
+  if (l.reduce((t, f) => t + f.size, 0) > MAX_TOTAL) return 'Entre los 3 archivos no pueden superar 15 MB.';
+  const vistos = new Set(); for (const f of l) { const k = `${f.name}|${f.size}|${f.lastModified}`; if (vistos.has(k)) return `«${f.name}» está repetido en este envío.`; vistos.add(k); }
+  return '';
+}
+// Muestra los archivos elegidos y, si cambian, oculta la justificación (se vuelve a pedir solo si hace falta).
+function enlazarArchivos(pre) {
+  const inp = $(`${pre}-archivo`);
+  inp.addEventListener('change', () => {
+    const l = [...inp.files]; $(`err-${pre}-archivo`).textContent = ''; ocultarJust(pre);
+    $(`${pre}-lista`).innerHTML = l.map((f) => `<li><span>${esc(f.name)}</span><small>${tamanoTxt(f.size)}</small></li>`).join('') + (l.length > 1 ? `<li><b>Total</b><small>${tamanoTxt(l.reduce((t, f) => t + f.size, 0))} de 15 MB</small></li>` : '');
+    const ea = l.length ? validarArchivos(l) : ''; if (ea) $(`err-${pre}-archivo`).textContent = ea;
+  });
+}
+const ocultarJust = (pre) => { $(`${pre}-just`).hidden = true; $(`${pre}-just-t`).value = ''; $(`err-${pre}-just`).textContent = ''; };
+const mostrarJust = (pre, msg, campo) => { $(`${pre}-just`).hidden = false; $(`${pre}-just-msg`).textContent = msg; $(`err-${pre}-just`).textContent = campo || ''; $(`${pre}-just-t`).focus(); };
+// ¿Falta la justificación? (solo cuando el servidor avisó que hay archivos repetidos)
+function falloJust(pre) { if ($(`${pre}-just`).hidden) return false; if ($(`${pre}-just-t`).value.trim().length < 10) { $(`err-${pre}-just`).textContent = 'Escribe al menos 10 caracteres explicando por qué lo vuelves a subir'; return true; } return false; }
+const cabJust = (pre) => ($(`${pre}-just`).hidden ? {} : { 'X-Justificacion': encodeURIComponent($(`${pre}-just-t`).value.trim()) });
 function validarArchivo(f) {
   if (!f) return 'Debes adjuntar la evidencia del pago.';
   if (!TIPOS.includes(f.type)) return MSG_FORMATOS;
@@ -227,13 +253,17 @@ async function abrirEvidencia(pagoId) {
   $('evid-datos').innerHTML = dl([['ID', p.codigo], ['Concepto', esc(p.concepto)], ['Entidad', esc(p.entidad)], ['Categoría', esc(p.categoria)], ...detalleHtml(p), ['Monto', cuenta(p.monto)], ...(p.mora > 0 ? [['Mora pagada', cuenta(p.mora)], ['Total pagado', cuenta(p.total)]] : []), ['Método de pago', esc(p.metodo_texto || '—')], ['Fecha y hora de pago', `${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}`], ['Comentario del pago', p.comentario ? esc(p.comentario) : '—']]);
   const mostrar = (a, etiqueta) => {
     const url = `/api/evidencias/${a.id}`;
-    $('evid-cuerpo').innerHTML = `<p class="evid-etq">${etiqueta}: ${esc(a.nombre)}</p><p class="evid-com">Comentario: ${a.comentario ? esc(a.comentario) : '—'}</p>` + (a.tipo === 'application/pdf' ? `<iframe src="${url}" title="Evidencia"></iframe>` : `<img src="${url}" alt="Evidencia del pago">`);
+    $('evid-cuerpo').innerHTML = `<p class="evid-etq">${etiqueta}: ${esc(a.nombre)}</p><p class="evid-com">Comentario: ${a.comentario ? esc(a.comentario) : '—'}</p>` + (a.justificacion ? `<p class="evid-just">⚠ Archivo repetido. Justificación: ${esc(a.justificacion)}</p>` : '') + (a.tipo === 'application/pdf' ? `<iframe src="${url}" title="Evidencia"></iframe>` : `<img src="${url}" alt="Evidencia del pago">`);
     $('evid-descargar').href = url + '?descargar=1'; $('evid-descargar').hidden = false;
   };
-  mostrar(d.vigente, 'Evidencia vigente');
-  $('evid-previos').innerHTML = d.previos.length ? `<h4>Intentos previos (solo lectura)</h4><ul class="previos">${d.previos.map((a) => `<li><span>Intento ${a.numero_intento} · ${esc(a.nombre)} · reemplazado el ${esc(a.reemplazada_en)}<br><small>Comentario: ${a.comentario ? esc(a.comentario) : '—'}</small></span>
-      <button class="btn btn-claro btn-sm" data-prev="${a.id}">Ver</button> <a class="btn btn-claro btn-sm" href="/api/evidencias/${a.id}?descargar=1">Descargar</a></li>`).join('')}</ul>` : '';
+  const vig = d.vigentes && d.vigentes.length ? d.vigentes : [d.vigente];
+  mostrar(vig[0], vig.length > 1 ? `Evidencia vigente (1 de ${vig.length})` : 'Evidencia vigente');
+  const grupos = {}; d.previos.forEach((a) => (grupos[a.numero_intento] = grupos[a.numero_intento] || []).push(a));
+  $('evid-previos').innerHTML = (vig.length > 1 ? `<h4>Archivos de la evidencia vigente (${vig.length})</h4><div class="evid-arch">${vig.map((a, i) => `<button class="btn btn-claro btn-sm" data-vig="${a.id}">${i + 1}. ${esc(a.nombre)}</button>`).join('')}</div>` : '')
+    + (d.previos.length ? `<h4>Intentos previos (solo lectura)</h4>` + Object.keys(grupos).sort((x, y) => y - x).map((n) => `<p class="evid-lote">Intento ${n} · reemplazado el ${esc(grupos[n][0].reemplazada_en)} · ${grupos[n].length} archivo${grupos[n].length > 1 ? 's' : ''}</p><ul class="previos">${grupos[n].map((a) => `<li><span>${esc(a.nombre)}<br><small>Comentario: ${a.comentario ? esc(a.comentario) : '—'}${a.justificacion ? ` · Justificación: ${esc(a.justificacion)}` : ''}</small></span>
+      <button class="btn btn-claro btn-sm" data-prev="${a.id}">Ver</button> <a class="btn btn-claro btn-sm" href="/api/evidencias/${a.id}?descargar=1">Descargar</a></li>`).join('')}</ul>`).join('') : '');
   $('evid-previos').querySelectorAll('[data-prev]').forEach((b) => (b.onclick = () => mostrar(d.previos.find((x) => String(x.id) === b.dataset.prev), 'Intento previo')));
+  $('evid-previos').querySelectorAll('[data-vig]').forEach((b) => (b.onclick = () => mostrar(vig.find((x) => String(x.id) === b.dataset.vig), 'Evidencia vigente')));
   $('dlg-evid').showModal(); animarContadores($('evid-datos'));
 }
 $('evid-cerrar').onclick = () => { $('dlg-evid').close(); $('evid-cuerpo').innerHTML = ''; };
@@ -459,12 +489,12 @@ function leerMetodo() {
 function abrirPagar(p) {
   pagoActual = p; $('pagar-datos').innerHTML = datosPago(p);
   const hoyL = fechaLima(); const f = $('pagar-fecha'); f.value = hoyL; f.max = hoyL; f.min = sumaDias(hoyL, -7); $('pagar-hora').value = horaLima();
-  armarMetodos(p); $('pagar-coment').value = ''; $('pagar-archivo').value = ''; limpiarErrores($('dlg-pagar')); $('pagar-error').textContent = '';
+  armarMetodos(p); $('pagar-coment').value = ''; $('pagar-archivo').value = ''; $('pagar-lista').innerHTML = ''; ocultarJust('pagar'); limpiarErrores($('dlg-pagar')); $('pagar-error').textContent = '';
   $('pagar-paso1').hidden = false; $('pagar-paso2').hidden = true; $('dlg-pagar').showModal(); animarContadores($('pagar-datos'));
 }
 $('pagar-continuar').onclick = () => {
   limpiarErrores($('dlg-pagar')); let mal = false;
-  const fecha = $('pagar-fecha').value, hora = $('pagar-hora').value, archivo = $('pagar-archivo').files[0];
+  const fecha = $('pagar-fecha').value, hora = $('pagar-hora').value, archivo = [...$('pagar-archivo').files];
   if (!fecha) { $('err-pagar-fecha').textContent = 'Indica la fecha de pago'; mal = true; }
   else if (fecha < sumaDias(fechaLima(), -7)) { $('err-pagar-fecha').textContent = 'No puede ser anterior a una semana'; mal = true; }
   if (!hora) { $('err-pagar-hora').textContent = 'Indica la hora de pago'; mal = true; }
@@ -472,24 +502,28 @@ $('pagar-continuar').onclick = () => {
   if (!mp.metodo) { $('err-pagar-metodo').textContent = 'Selecciona el método de pago'; mal = true; }
   else if (SUBS[mp.metodo] && !mp.detalle) { $('err-pagar-sub').textContent = mp.metodo === 'BILLETERA' ? 'Selecciona Plin, Yape o Agora' : 'Selecciona crédito o débito'; mal = true; }
   if (fecha && hora && `${fecha} ${hora}` > `${fechaLima()} ${horaLima()}`) { $('err-pagar-fecha').textContent = 'No puede ser posterior al momento actual'; mal = true; }
-  const ea = validarArchivo(archivo); if (ea) { $('err-pagar-archivo').textContent = ea; mal = true; }
+  const ea = validarArchivos(archivo); if (ea) { $('err-pagar-archivo').textContent = ea; mal = true; }
+  if (!ea && falloJust('pagar')) mal = true;
   if (mal) return;
-  $('pagar-resumen').innerHTML = datosPago(pagoActual) + dl([['Método de pago', esc(mp.texto)], ['Fecha y hora de pago', `${fmtFecha(fecha)} ${hora}`], ['Comentario', $('pagar-coment').value.trim() ? esc($('pagar-coment').value.trim()) : '—'], ['Evidencia', esc(archivo.name)]]);
+  $('pagar-resumen').innerHTML = datosPago(pagoActual) + dl([['Método de pago', esc(mp.texto)], ['Fecha y hora de pago', `${fmtFecha(fecha)} ${hora}`], ['Comentario', $('pagar-coment').value.trim() ? esc($('pagar-coment').value.trim()) : '—'], ['Evidencia', archivo.map((f) => esc(f.name)).join('<br>')], ...($('pagar-just').hidden ? [] : [['Justificación', esc($('pagar-just-t').value.trim())]])]);
   $('pagar-paso1').hidden = true; $('pagar-paso2').hidden = false;
 };
+enlazarArchivos('pagar'); enlazarArchivos('cambiar');
 $('pagar-volver').onclick = () => { $('pagar-paso1').hidden = false; $('pagar-paso2').hidden = true; };
 $('pagar-confirmar').onclick = async () => {
   const b = $('pagar-confirmar'); b.disabled = true; $('pagar-error').textContent = '';
-  const fecha = $('pagar-fecha').value, hora = $('pagar-hora').value, archivo = $('pagar-archivo').files[0];
+  const fecha = $('pagar-fecha').value, hora = $('pagar-hora').value, archivo = [...$('pagar-archivo').files];
   try {
-    const r = await enviarArchivo(`/api/pagos/${pagoActual.id}/pagar`, archivo, { 'X-Fecha-Pago': fecha, 'X-Hora-Pago': hora, 'X-Metodo-Pago': leerMetodo().metodo, 'X-Metodo-Detalle': leerMetodo().detalle, 'X-Comentario': encodeURIComponent($('pagar-coment').value.trim()) });
+    const r = await enviarArchivos(`/api/pagos/${pagoActual.id}/pagar`, archivo, { ...cabJust('pagar'), 'X-Fecha-Pago': fecha, 'X-Hora-Pago': hora, 'X-Metodo-Pago': leerMetodo().metodo, 'X-Metodo-Detalle': leerMetodo().detalle, 'X-Comentario': encodeURIComponent($('pagar-coment').value.trim()) });
     $('dlg-pagar').close();
-    aviso('Pago registrado', `El pago «${r.concepto}» se registró como realizado.\nMétodo de pago: ${r.metodo_texto}\n${r.mora > 0 ? `Mora incluida: ${soles(r.mora)} (total ${soles(r.total)})\n` : ''}Fecha y hora: ${fmtFecha(r.fecha_pago)} ${r.hora_pago}\nEvidencia: ${r.archivo}`);
+    aviso('Pago registrado', `El pago «${r.concepto}» se registró como realizado.\nMétodo de pago: ${r.metodo_texto}\n${r.mora > 0 ? `Mora incluida: ${soles(r.mora)} (total ${soles(r.total)})\n` : ''}Fecha y hora: ${fmtFecha(r.fecha_pago)} ${r.hora_pago}\nEvidencia: ${r.archivos.join(', ')}`);
     await refrescar();
   } catch (e) {
     if (e.sesion) return;
-    if (e.status === 409 && e.campos && e.campos.archivo) {            // archivo repetido: se vuelve a elegir otro
-      $('pagar-paso1').hidden = false; $('pagar-paso2').hidden = true; $('pagar-archivo').value = ''; $('err-pagar-archivo').textContent = e.campos.archivo; return;
+    if (e.campos && e.campos.archivo) {            // archivo repetido o inválido: se vuelve al paso 1
+      $('pagar-paso1').hidden = false; $('pagar-paso2').hidden = true;
+      if (e.requiereJustificacion) { mostrarJust('pagar', e.message, e.campos.justificacion); return; }   // repetido: se acepta con justificación
+      $('pagar-archivo').value = ''; $('pagar-lista').innerHTML = ''; ocultarJust('pagar'); $('err-pagar-archivo').textContent = e.campos.archivo; return;
     }
     $('pagar-error').textContent = e.red || !e.status || e.status >= 500 ? 'La operación no se completó. El pago sigue Pendiente y sin evidencia.' : e.message;
   } finally { b.disabled = false; }
@@ -499,25 +533,30 @@ $('pagar-confirmar').onclick = async () => {
 function abrirCambiar(p) {
   pagoActual = p; const usados = p.intentos_usados || 0; const rest = 3 - usados;
   $('cambiar-datos').innerHTML = datosPago(p) + dl([['Archivo vigente', esc(p.evidencia_nombre || 'Sin archivo')], ['Intentos usados', `${usados} de 3`], ['Intentos disponibles', String(rest)]]);
-  $('cambiar-archivo').value = ''; $('cambiar-coment').value = ''; limpiarErrores($('dlg-cambiar')); $('cambiar-error').textContent = '';
+  $('cambiar-archivo').value = ''; $('cambiar-lista').innerHTML = ''; ocultarJust('cambiar'); $('cambiar-coment').value = ''; limpiarErrores($('dlg-cambiar')); $('cambiar-error').textContent = '';
   $('cambiar-paso1').hidden = false; $('cambiar-paso2').hidden = true;
   if (rest <= 0) return aviso('Cambio de evidencia', 'Se alcanzó el máximo de 3 intentos de cambio de evidencia para este pago.');
   $('dlg-cambiar').showModal(); animarContadores($('cambiar-datos'));
 }
 $('cambiar-continuar').onclick = () => {
-  limpiarErrores($('dlg-cambiar')); const a = $('cambiar-archivo').files[0]; const ea = validarArchivo(a);
+  limpiarErrores($('dlg-cambiar')); const a = [...$('cambiar-archivo').files]; const ea = validarArchivos(a);
   if (ea) { $('err-cambiar-archivo').textContent = ea; return; }
-  $('cambiar-confirma').textContent = (pagoActual.evidencia_nombre ? `Se reemplazará «${pagoActual.evidencia_nombre}» por «${a.name}». El archivo actual quedará como intento previo y este cambio contará como un intento.${$('cambiar-coment').value.trim() ? ` Comentario: «${$('cambiar-coment').value.trim()}».` : ''} ¿Confirmas?` : `Se adjuntará «${a.name}» como evidencia de este pago. ¿Confirmas?`);
+  if (falloJust('cambiar')) return;
+  const nombres = a.map((f) => `«${f.name}»`).join(', ');
+  $('cambiar-confirma').textContent = (pagoActual.evidencia_nombre ? `Se reemplazará «${pagoActual.evidencia_nombre}» por ${nombres}. Los archivos actuales quedarán como intento previo y este cambio contará como un intento.${$('cambiar-coment').value.trim() ? ` Comentario: «${$('cambiar-coment').value.trim()}».` : ''}${$('cambiar-just').hidden ? '' : ` Justificación: «${$('cambiar-just-t').value.trim()}».`} ¿Confirmas?` : `Se adjuntará ${nombres} como evidencia de este pago.${$('cambiar-just').hidden ? '' : ` Justificación: «${$('cambiar-just-t').value.trim()}».`} ¿Confirmas?`);
   $('cambiar-paso1').hidden = true; $('cambiar-paso2').hidden = false;
 };
 $('cambiar-volver').onclick = () => { $('cambiar-paso1').hidden = false; $('cambiar-paso2').hidden = true; };
 $('cambiar-confirmar').onclick = async () => {
   const b = $('cambiar-confirmar'); b.disabled = true; $('cambiar-error').textContent = '';
   try {
-    const r = await enviarArchivo(`/api/pagos/${pagoActual.id}/evidencia`, $('cambiar-archivo').files[0], { 'X-Comentario': encodeURIComponent($('cambiar-coment').value.trim()) });
+    const r = await enviarArchivos(`/api/pagos/${pagoActual.id}/evidencia`, $('cambiar-archivo').files, { ...cabJust('cambiar'), 'X-Comentario': encodeURIComponent($('cambiar-coment').value.trim()) });
     $('dlg-cambiar').close(); aviso('Evidencia cambiada', `La evidencia se cambió correctamente. Te ${r.intentos_restantes === 1 ? 'queda 1 intento' : `quedan ${r.intentos_restantes} intentos`} de cambio.`); await refrescar();
   } catch (e) {
-    if (!e.sesion && e.status === 409 && e.campos && e.campos.archivo) { $('cambiar-paso1').hidden = false; $('cambiar-paso2').hidden = true; $('cambiar-archivo').value = ''; $('err-cambiar-archivo').textContent = e.campos.archivo; return; }
+    if (!e.sesion && e.campos && e.campos.archivo) {
+      $('cambiar-paso1').hidden = false; $('cambiar-paso2').hidden = true;
+      if (e.requiereJustificacion) { mostrarJust('cambiar', e.message, e.campos.justificacion); return; }
+      $('cambiar-archivo').value = ''; $('cambiar-lista').innerHTML = ''; ocultarJust('cambiar'); $('err-cambiar-archivo').textContent = e.campos.archivo; return; }
     if (!e.sesion) $('cambiar-error').textContent = e.red || !e.status || e.status >= 500 ? 'La operación no se completó. Se mantiene la evidencia actual.' : e.message; }
   finally { b.disabled = false; }
 };

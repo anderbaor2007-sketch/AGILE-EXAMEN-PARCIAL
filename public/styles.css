@@ -327,3 +327,14 @@ dialog[open]::backdrop { animation: fundir .3s ease; background: rgba(6, 40, 29,
 }
 
 .g-kpi.hielo .g-kpi-ic { background: var(--hielo); color: var(--hielo-txt); }
+
+/* Evidencias: varios archivos y justificación de repetidos */
+.lista-arch { list-style: none; margin: 6px 0 4px; padding: 0; display: grid; gap: 6px; }
+.lista-arch li { display: flex; justify-content: space-between; gap: 10px; background: var(--verde-claro); border: 1px solid #bfe3cf; border-radius: 10px; padding: 7px 12px; font-size: .9rem; animation: subir .25s var(--ease) both; }
+.lista-arch li small { color: #5b7a6c; white-space: nowrap; }
+.lista-arch li.mal { background: #fee2e2; border-color: #fca5a5; }
+.just { background: #fff7ed; border: 1px solid #fdba74; border-radius: 12px; padding: 10px 14px; margin: 8px 0; animation: subir .25s var(--ease) both; }
+.just-msg { margin: 0 0 8px; color: #9a3412; font-weight: 600; font-size: .9rem; }
+.evid-lote { margin: 8px 0 4px; font-weight: 700; }
+.evid-arch { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.evid-just { color: #9a3412; font-size: .9rem; }

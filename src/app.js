@@ -106,7 +106,7 @@ async function manejar(req, res) {
 module.exports = http.createServer((req, res) => {
   manejar(req, res).catch((e) => {
     if (res.headersSent) return res.end();
-    if (e.status === 413) return responder(res, 413, { error: 'El archivo supera 5 MB' });
+    if (e.status === 413) return responder(res, 413, { error: 'Entre los archivos no pueden superar 15 MB' });
     console.error(e);
     responder(res, 500, { error: req.url === '/api/login' ? 'No fue posible iniciar sesión.' : 'Error interno' });
   });

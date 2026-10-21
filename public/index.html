@@ -245,7 +245,10 @@
       <label id="pagar-sub-lab" hidden><span id="pagar-sub-t"></span> <select id="pagar-sub"></select><span class="campo-error" id="err-pagar-sub"></span></label>
       <p class="aviso-chico" id="pagar-metodo-nota">Ningún método de pago tiene descuento: el monto a pagar es el mismo.</p>
       <label>Comentario (opcional) <textarea id="pagar-coment" maxlength="300" rows="2"></textarea></label>
-      <label>Evidencia (JPG, PNG o PDF, máx. 5 MB) <input type="file" id="pagar-archivo" accept="image/jpeg,image/png,application/pdf"><span class="campo-error" id="err-pagar-archivo"></span></label>
+      <label>Evidencia (hasta 3 archivos JPG, PNG o PDF; máx. 5 MB cada uno y 15 MB en total) <input type="file" id="pagar-archivo" multiple accept="image/jpeg,image/png,application/pdf"><span class="campo-error" id="err-pagar-archivo"></span></label>
+      <ul class="lista-arch" id="pagar-lista"></ul>
+      <div class="just" id="pagar-just" hidden><p class="just-msg" id="pagar-just-msg"></p>
+        <label>Justificación (obligatoria para subir un archivo ya usado) <textarea id="pagar-just-t" maxlength="300" rows="2" placeholder="Explica por qué vuelves a subir este archivo"></textarea><span class="campo-error" id="err-pagar-just"></span></label></div>
       <menu><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="pagar-continuar">Continuar</button></menu>
     </div>
     <div id="pagar-paso2" hidden>
@@ -261,9 +264,12 @@
     <h3>Cambiar evidencia</h3>
     <dl class="datos" id="cambiar-datos"></dl>
     <div id="cambiar-paso1">
-      <label>Nuevo archivo (JPG, PNG o PDF, máx. 5 MB) <input type="file" id="cambiar-archivo" accept="image/jpeg,image/png,application/pdf"><span class="campo-error" id="err-cambiar-archivo"></span></label>
+      <label>Nuevos archivos (hasta 3 JPG, PNG o PDF; máx. 5 MB cada uno y 15 MB en total) <input type="file" id="cambiar-archivo" multiple accept="image/jpeg,image/png,application/pdf"><span class="campo-error" id="err-cambiar-archivo"></span></label>
+      <ul class="lista-arch" id="cambiar-lista"></ul>
+      <div class="just" id="cambiar-just" hidden><p class="just-msg" id="cambiar-just-msg"></p>
+        <label>Justificación (obligatoria para subir un archivo ya usado) <textarea id="cambiar-just-t" maxlength="300" rows="2" placeholder="Explica por qué vuelves a subir este archivo"></textarea><span class="campo-error" id="err-cambiar-just"></span></label></div>
       <label>Comentario (opcional) <textarea id="cambiar-coment" maxlength="300" rows="2"></textarea></label>
-      <p class="aviso-chico">ℹ️ El archivo vigente se guardará como intento previo y quedará visible para el gerente.</p>
+      <p class="aviso-chico">ℹ️ Los archivos vigentes se guardarán como intento previo y quedará visible para el gerente.</p>
       <menu><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="cambiar-continuar">Continuar</button></menu>
     </div>
     <div id="cambiar-paso2" hidden>
