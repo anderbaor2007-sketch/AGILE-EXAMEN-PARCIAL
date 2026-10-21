@@ -215,3 +215,10 @@ td.cod { font-family: ui-monospace, Consolas, monospace; font-size: .8rem; font-
 .cuotas-scroll .cuotas-tabla { margin: 0; }
 .cuotas-scroll thead th { position: sticky; top: 0; background: #f6f8fc; }
 .mora { color: #b45309; font-size: .75rem; display: block; }
+
+/* Ver detalles */
+.acc-col { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.dlg-ancho { width: min(860px, 94vw); }
+.det-sub { margin: 14px 0 6px; font-size: .95rem; color: var(--navy-2); }
+.cuotas-tabla tr.cuota-actual td { background: #e8f1ff; font-weight: 700; }
+.cuotas-scroll { max-height: 280px; }

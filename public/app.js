@@ -129,14 +129,43 @@ async function cargarPanel() {
 
   // Tablas
   const tabla = (idf, idv, filas, html) => { $(idf).innerHTML = filas.map(html).join(''); $(idv).hidden = filas.length > 0; };
-  tabla('g-hoy-f', 'g-hoy-v', d.hoy_lista, (p) => `<tr><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td class="monto">${celdaMonto(p)}</td><td>${p.estado === 'PAGADO' ? '<span class="etq PAGADO">Pagado</span>' : etqSituacion(p)}</td></tr>`);
-  tabla('g-pagado-f', 'g-pagado-v', d.pagados, (p) => `<tr><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td><span class="cat">${esc(p.categoria)}</span></td><td class="monto">${celdaMonto(p)}</td><td>${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}</td><td>${esc(p.metodo_texto || '—')}</td><td><button class="btn btn-claro btn-sm" data-evid="${p.id}">Ver evidencia</button></td></tr>`);
-  tabla('g-pend-f', 'g-pend-v', d.pendientes, (p) => `<tr class="${p.alerta === 'ATRASADO' ? 'fila-atrasada' : ''}"><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td class="monto">${celdaMonto(p)}</td><td>${fmtFecha(p.fecha_vencimiento)}</td><td>${etqSituacion(p)}</td></tr>`);
+  tabla('g-hoy-f', 'g-hoy-v', d.hoy_lista, (p) => `<tr><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td class="monto">${celdaMonto(p)}</td><td>${p.estado === 'PAGADO' ? '<span class="etq PAGADO">Pagado</span>' : etqSituacion(p)}</td><td>${btnVer(p.id)}</td></tr>`);
+  tabla('g-pagado-f', 'g-pagado-v', d.pagados, (p) => `<tr><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td><span class="cat">${esc(p.categoria)}</span></td><td class="monto">${celdaMonto(p)}</td><td>${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}</td><td>${esc(p.metodo_texto || '—')}</td><td><div class="acc-col"><button class="btn btn-claro btn-sm" data-evid="${p.id}">Ver evidencia</button>${btnVer(p.id)}</div></td></tr>`);
+  tabla('g-pend-f', 'g-pend-v', d.pendientes, (p) => `<tr class="${p.alerta === 'ATRASADO' ? 'fila-atrasada' : ''}"><td class="cod">${p.codigo}</td><td><b>${esc(p.concepto)}</b></td><td>${esc(p.entidad)}</td><td class="monto">${celdaMonto(p)}</td><td>${fmtFecha(p.fecha_vencimiento)}</td><td>${etqSituacion(p)}</td><td>${btnVer(p.id)}</td></tr>`);
   tabla('g-cambios-f', 'g-cambios-v', d.cambios, (c) => `<tr><td class="cod">${c.codigo}</td><td><b>${esc(c.concepto)}</b><br><small>${esc(c.entidad)}</small></td><td>Intento ${c.numero_intento}</td><td>${esc(c.fecha_hora)}</td><td><button class="btn btn-claro btn-sm" data-evid="${c.pago_id}">Ver evidencia</button></td></tr>`);
   document.querySelectorAll('[data-evid]').forEach((b) => (b.onclick = () => abrirEvidencia(b.dataset.evid)));
+  document.querySelectorAll('#vista-gerente [data-ver]').forEach((b) => (b.onclick = () => abrirDetalle(b.dataset.ver)));
 }
 $('g-actualizar').onclick = async () => { const b = $('g-actualizar'); b.disabled = true; await cargarPanel(); b.disabled = false; };
 document.querySelectorAll('.lateral-nav a').forEach((a) => a.addEventListener('click', () => { document.querySelectorAll('.lateral-nav a').forEach((x) => x.classList.toggle('activo', x === a)); }));
+
+// ---------- Ver detalles de un pago (gerente y asistente) ----------
+const estadoCuota = (c) => (c.estado === 'PAGADO' ? '<span class="etq PAGADO">Pagado</span>' : c.alerta === 'ATRASADO' ? `<span class="etq ATRASADO">Atrasado · ${-c.dias} d</span>` : c.alerta === 'POR_VENCER' ? '<span class="etq POR_VENCER">Por vencer</span>' : '<span class="etq PENDIENTE">Pendiente</span>');
+async function abrirDetalle(id) {
+  let d;
+  try { d = await api(`/api/pagos/${id}/detalle`); }
+  catch (e) { if (e.sesion) return; return aviso('Detalles del pago', 'No fue posible cargar los detalles del pago.'); }
+  const p = d.pago; const pagado = p.estado === 'PAGADO';
+  $('det-datos').innerHTML = dl([
+    ['ID', p.codigo], ['Estado', estadoCuota(p)], ['Concepto', esc(p.concepto)], ['Entidad', esc(p.entidad)], ['Categoría', esc(p.categoria)], ...detalleHtml(p),
+    ['Monto', soles(p.monto)], ...(p.mora > 0 ? [[pagado ? 'Mora pagada' : 'Mora por atraso', soles(p.mora)], [pagado ? 'Total pagado' : 'Total a pagar', soles(p.total)]] : []),
+    ['Vencimiento', fmtFecha(p.fecha_vencimiento)], ['Registrado el', esc(p.registrado_en)],
+    ...(pagado ? [['Fecha y hora de pago', `${fmtFecha(p.fecha_pago)} ${esc(p.hora_pago || '')}`], ['Método de pago', esc(p.metodo_texto || '—')], ['Pagado por', esc(p.pagado_por_nombre || '—')],
+      ['Comentario', p.comentario ? esc(p.comentario) : '—'], ['Evidencia', esc(p.evidencia_nombre || '—')], ['Cambios de evidencia', `${p.intentos_usados} de 3`]] : [])]);
+  const pre = d.prestamo; $('det-prestamo').hidden = !pre;
+  if (pre) {
+    const r = pre.resumen;
+    $('det-pre-datos').innerHTML = dl([['Entidad bancaria', esc(pre.entidad)], ['Monto total', soles(pre.monto_total)], ['Número de cuotas', String(pre.num_cuotas)], ['Mora (TNA, base 360 días)', `${pre.mora_tna} %`],
+      ['Primera cuota', fmtFecha(pre.fecha_primera_cuota)], ['Vence el préstamo', fmtFecha(pre.fecha_vencimiento_total)],
+      ['Avance', `${r.pagadas} pagadas · ${r.pendientes} pendientes${r.atrasadas ? ` (${r.atrasadas} atrasadas)` : ''}`], ['Total pagado', soles(r.total_pagado)], ['Saldo por pagar', soles(r.saldo)]]);
+    $('det-cuotas').innerHTML = d.cuotas.map((c) => `<tr class="${c.actual ? 'cuota-actual' : ''}"><td>${c.numero_cuota} de ${pre.num_cuotas}${c.actual ? ' ◀' : ''}</td><td class="cod">${c.codigo}</td><td>${fmtFecha(c.fecha_vencimiento)}</td>
+      <td class="der">${soles(c.monto)}</td><td class="der">${c.mora > 0 ? soles(c.mora) : '—'}</td><td class="der">${soles(c.total)}</td><td>${estadoCuota(c)}</td><td>${c.estado === 'PAGADO' ? `${fmtFecha(c.fecha_pago)} ${esc(c.hora_pago || '')}<br><small>${esc(c.metodo_texto || '')}</small>` : '—'}</td></tr>`).join('');
+  }
+  const ev = $('det-evid'); ev.hidden = !(usuario && usuario.rol === 'GERENTE' && pagado);
+  ev.onclick = () => { $('dlg-detalle').close(); abrirEvidencia(p.id); };
+  $('dlg-detalle').showModal();
+}
+$('det-cerrar').onclick = () => $('dlg-detalle').close();
 
 // ---------- HU-03: evidencia (solo gerente) ----------
 async function abrirEvidencia(pagoId) {
@@ -171,9 +200,10 @@ function etiquetaEstado(p) {
   if (p.estado === 'PAGADO') return '<span class="etq PAGADO">Pagado</span>';
   return '<span class="etq PENDIENTE">Pendiente</span>' + (p.alerta === 'ATRASADO' ? ' <span class="etq ATRASADO">Atrasado</span>' : '');
 }
+const btnVer = (id) => `<button class="btn btn-claro btn-sm" data-ver="${id}">Ver detalles</button>`;
 function botonesPago(p) {
-  if (p.estado === 'PENDIENTE') return `<button class="btn btn-primario btn-sm" data-pagar="${p.id}">Registrar pago</button>`;
-  return `<button class="btn btn-claro btn-sm" data-cambiar="${p.id}">Cambiar evidencia</button><br><small>Cambios: ${p.intentos_usados}/3</small>`;
+  if (p.estado === 'PENDIENTE') return `<div class="acc-col"><button class="btn btn-primario btn-sm" data-pagar="${p.id}">Registrar pago</button>${btnVer(p.id)}</div>`;
+  return `<div class="acc-col"><button class="btn btn-claro btn-sm" data-cambiar="${p.id}">Cambiar evidencia</button><small>Cambios: ${p.intentos_usados}/3</small>${btnVer(p.id)}</div>`;
 }
 
 // ---------- HU-04: pagos del mes (lista y calendario) ----------
@@ -245,6 +275,7 @@ function avisoAlIngresar(d) {
 
 function enlazarAcciones(raiz) {
   raiz.querySelectorAll('[data-pagar]').forEach((b) => (b.onclick = () => abrirPagar(buscarPago(b.dataset.pagar))));
+  raiz.querySelectorAll('[data-ver]').forEach((b) => (b.onclick = () => abrirDetalle(b.dataset.ver)));
   raiz.querySelectorAll('[data-cambiar]').forEach((b) => (b.onclick = () => abrirCambiar(buscarPago(b.dataset.cambiar))));
 }
 const buscarPago = (id) => pagosMes.find((x) => String(x.id) === id) || pagosVencer.find((x) => String(x.id) === id);

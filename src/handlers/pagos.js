@@ -383,6 +383,28 @@ async function cambiarEvidencia({ params, bodyCrudo, headers, usuario }) {
   return { status: 200, json: { ok: true, intentos_restantes: MAX_CAMBIOS_EVIDENCIA - (usados + 1) } };
 }
 
+// ---------- Ver detalles: todos los datos de un pago (y, si es un préstamo, todas sus cuotas) ----------
+// GET /api/pagos/:id/detalle — lo pueden ver el gerente y el asistente
+async function detalle({ params }) {
+  const [p0] = await query(`${SELECT} WHERE p.id = $1`, [params.id]);
+  if (!p0) return err(404, 'Pago no encontrado');
+  const p = conAlerta(p0);
+  const [extra] = await query(`SELECT to_char(x.creado_en AT TIME ZONE 'America/Lima', 'DD/MM/YYYY HH24:MI') AS registrado_en, u.nombre AS pagado_por_nombre
+    FROM pagos x LEFT JOIN usuarios u ON u.id = x.pagado_por WHERE x.id = $1`, [p.id]);
+  let prestamo = null; let cuotas = null;
+  if (p.prestamo_id) {
+    [prestamo] = await query(`SELECT entidad, monto_total::float8 AS monto_total, num_cuotas, mora_tna::float8 AS mora_tna, fecha_vencimiento_total, fecha_primera_cuota
+      FROM prestamos WHERE id = $1`, [p.prestamo_id]);
+    const filas = (await query(`${SELECT} WHERE p.prestamo_id = $1 ORDER BY p.numero_cuota`, [p.prestamo_id])).map(conAlerta);
+    cuotas = filas.map((c) => ({ id: c.id, codigo: c.codigo, numero_cuota: c.numero_cuota, fecha_vencimiento: c.fecha_vencimiento, monto: c.monto, mora: c.mora, total: c.total,
+      estado: c.estado, alerta: c.alerta, dias: c.dias, fecha_pago: c.fecha_pago, hora_pago: c.hora_pago, metodo_texto: c.metodo_texto, actual: c.id === p.id }));
+    const pagadas = filas.filter((c) => c.estado === 'PAGADO');
+    prestamo.resumen = { pagadas: pagadas.length, pendientes: filas.length - pagadas.length, atrasadas: filas.filter((c) => c.alerta === 'ATRASADO').length,
+      total_pagado: suma(pagadas), saldo: suma(filas.filter((c) => c.estado !== 'PAGADO')) };
+  }
+  return { status: 200, json: { pago: { ...p, ...extra }, prestamo, cuotas } };
+}
+
 // ---------- HU-03: evidencia vigente + intentos previos (solo gerente) ----------
 // GET /api/pagos/:id/evidencias
 async function infoEvidencias({ params }) {
@@ -404,4 +426,4 @@ async function verArchivo({ params, query: qs }) {
   return { status: 200, buffer: e.datos, tipo: e.tipo_mime, nombre: e.nombre_original, descargar: qs.get('descargar') === '1' };
 }
 
-module.exports = { listar, panel, porVencer, categorias, verificar, crear, pagar, cambiarEvidencia, infoEvidencias, verArchivo, MAX_BYTES };
+module.exports = { detalle, listar, panel, porVencer, categorias, verificar, crear, pagar, cambiarEvidencia, infoEvidencias, verArchivo, MAX_BYTES };

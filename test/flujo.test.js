@@ -205,6 +205,35 @@ test('Préstamos: cuotas mensuales, mora (TNA base 360 días) y método de pago 
   assert.equal((await pedir(asistente, 'GET', '/api/pagos')).json.pagos.find((x) => x.id === sinMora.json.id).mora, 0);
 });
 
+test('Ver detalles: todos los datos del pago y, en préstamos, todas sus cuotas (gerente y asistente)', async () => {
+  assert.equal((await pedir(null, 'GET', '/api/pagos/1/detalle')).status, 401);
+  assert.equal((await pedir(asistente, 'GET', '/api/pagos/999999/detalle')).status, 404);
+  // Servicio pendiente
+  const sv = await crear({ tipo_servicio: 'Agua', entidad: 'Sedalib', numero_recibo: 'A-77', codigo_suministro: '556677', monto: '88.8', fecha_vencimiento: mas(6) });
+  for (const rol of [asistente, gerente]) {
+    const r = await pedir(rol, 'GET', `/api/pagos/${sv.json.id}/detalle`); assert.equal(r.status, 200);
+    assert.equal(r.json.pago.concepto, 'Agua'); assert.equal(r.json.pago.categoria, 'Servicios'); assert.equal(r.json.pago.estado, 'PENDIENTE');
+    assert.deepEqual(r.json.pago.detalle, [['Servicio', 'Agua'], ['N.º de recibo', 'A-77'], ['Código de suministro', '556677']]);
+    assert.ok(r.json.pago.registrado_en); assert.equal(r.json.prestamo, null); assert.equal(r.json.cuotas, null);
+  }
+  // Pagado: método, quién pagó, comentario, evidencia
+  assert.equal((await pagarCon(sv.json.id, PNG, { 'X-Metodo-Pago': 'BILLETERA', 'X-Metodo-Detalle': 'PLIN', 'X-Comentario': encodeURIComponent('ok') })).status, 200);
+  const pg = (await pedir(gerente, 'GET', `/api/pagos/${sv.json.id}/detalle`)).json.pago;
+  assert.equal(pg.estado, 'PAGADO'); assert.equal(pg.metodo_texto, 'Billetera digital (Plin)'); assert.equal(pg.comentario, 'ok'); assert.equal(pg.evidencia_nombre, 'boleta.png'); assert.ok(pg.pagado_por_nombre);
+  // Préstamo: todas las cuotas
+  const rp = await pedir(asistente, 'POST', '/api/pagos', { categoria_id: 4, entidad: 'Scotiabank', monto_total: '900', num_cuotas: '3', mora_tna: '12', fecha_primera_cuota: mas(3), fecha_vencimiento_total: mesesMas(mas(3), 2) });
+  assert.equal(rp.status, 201);
+  const [c2] = await query("SELECT id FROM pagos WHERE entidad='Scotiabank' AND numero_cuota = 2");
+  const dp = (await pedir(asistente, 'GET', `/api/pagos/${c2.id}/detalle`)).json;
+  assert.equal(dp.cuotas.length, 3); assert.deepEqual(dp.cuotas.map((c) => c.numero_cuota), [1, 2, 3]); assert.deepEqual(dp.cuotas.map((c) => c.actual), [false, true, false]);
+  assert.equal(dp.prestamo.monto_total, 900); assert.equal(dp.prestamo.num_cuotas, 3); assert.equal(dp.prestamo.mora_tna, 12);
+  assert.deepEqual({ ...dp.prestamo.resumen }, { pagadas: 0, pendientes: 3, atrasadas: 0, total_pagado: 0, saldo: 900 });
+  const [c1] = await query("SELECT id FROM pagos WHERE entidad='Scotiabank' AND numero_cuota = 1");
+  assert.equal((await pagarCon(c1.id, PNG, { 'X-Metodo-Pago': 'TRANSFERENCIA' })).status, 200);
+  const dp2 = (await pedir(gerente, 'GET', `/api/pagos/${c2.id}/detalle`)).json;
+  assert.equal(dp2.cuotas[0].estado, 'PAGADO'); assert.equal(dp2.prestamo.resumen.pagadas, 1); assert.equal(dp2.prestamo.resumen.saldo, 600); assert.equal(dp2.prestamo.resumen.total_pagado, 300);
+});
+
 test('Método de pago: se elige al registrar el pago y no hay descuentos', async () => {
   const id = (await crear({ concepto: 'Método', fecha_vencimiento: mas(4) })).json.id;
   const m = (h) => pagarCon(id, PNG, h);
