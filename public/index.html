@@ -70,7 +70,7 @@
         <section class="tarjeta tabla-tarjeta" id="g-hoy"><div class="tarj-t"><h3>Pagos de hoy</h3></div>
           <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Estado</th></tr></thead><tbody id="g-hoy-f"></tbody></table><p id="g-hoy-v" class="vacio" hidden>No hay pagos con vencimiento hoy.</p></section>
         <section class="tarjeta tabla-tarjeta" id="g-pagado"><div class="tarj-t"><h3>Lo pagado</h3><small>Del más reciente al más antiguo</small></div>
-          <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th>Categoría</th><th class="der">Monto</th><th>Fecha y hora de pago</th><th></th></tr></thead><tbody id="g-pagado-f"></tbody></table><p id="g-pagado-v" class="vacio" hidden>Aún no hay pagos realizados este mes.</p></section>
+          <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th>Categoría</th><th class="der">Monto</th><th>Fecha y hora de pago</th><th>Método de pago</th><th></th></tr></thead><tbody id="g-pagado-f"></tbody></table><p id="g-pagado-v" class="vacio" hidden>Aún no hay pagos realizados este mes.</p></section>
         <section class="tarjeta tabla-tarjeta" id="g-pend"><div class="tarj-t"><h3>Pendientes del mes</h3><small>Los atrasados aparecen marcados</small></div>
           <table><thead><tr><th>ID</th><th>Concepto</th><th>Entidad</th><th class="der">Monto</th><th>Vencimiento</th><th>Situación</th></tr></thead><tbody id="g-pend-f"></tbody></table><p id="g-pend-v" class="vacio" hidden>No hay pagos pendientes.</p></section>
         <section class="tarjeta tabla-tarjeta" id="g-cambios"><div class="tarj-t"><h3>Cambios de evidencia</h3></div>
@@ -148,11 +148,48 @@
   <dialog id="dlg-nuevo">
     <h3>Registrar pago por realizar</h3>
     <div id="nuevo-paso1">
-      <label>Concepto <input id="n-concepto" maxlength="100"><span class="campo-error" data-err="concepto"></span></label>
-      <label>Entidad asociada (empresa o persona a la que se paga; solo letras) <input id="n-entidad" maxlength="100" autocomplete="off"><span class="campo-error" data-err="entidad"></span></label>
       <label>Categoría <select id="sel-cat"></select><span class="campo-error" data-err="categoria_id"></span></label>
-      <label>Monto (S/) <input id="n-monto" inputmode="decimal" placeholder="0.00"><span class="campo-error" data-err="monto"></span></label>
-      <label>Fecha de vencimiento <input id="n-venc" type="date"><span class="campo-error" data-err="fecha_vencimiento"></span></label>
+
+      <!-- Servicios -->
+      <div class="cat-form" id="f-Servicios" hidden>
+        <label>Servicio <select id="n-tipo"><option value="">Selecciona…</option><option>Agua</option><option>Luz</option><option>Internet</option></select><span class="campo-error" data-err="tipo_servicio"></span></label>
+        <label>Entidad (empresa a la que se paga; solo letras) <input id="n-ent-serv" maxlength="100" autocomplete="off"><span class="campo-error" data-err="entidad"></span></label>
+        <label>Número de recibo <input id="n-recibo" maxlength="30" autocomplete="off"><span class="campo-error" data-err="numero_recibo"></span></label>
+        <label id="lab-suministro" hidden>Código de suministro <input id="n-suministro" maxlength="20" autocomplete="off"><span class="campo-error" data-err="codigo_suministro"></span></label>
+      </div>
+
+      <!-- Proveedores -->
+      <div class="cat-form" id="f-Proveedores" hidden>
+        <label>RUC del proveedor (11 dígitos) <input id="n-ruc" maxlength="11" inputmode="numeric" autocomplete="off"><span class="campo-error" data-err="ruc"></span></label>
+        <label>Razón social <input id="n-razon" maxlength="100" autocomplete="off"><span class="campo-error" data-err="razon_social"></span></label>
+      </div>
+
+      <!-- Impuestos -->
+      <div class="cat-form" id="f-Impuestos" hidden>
+        <label>Entidad <select id="n-ent-imp"><option value="">Selecciona…</option><option>SUNAT</option><option>SAT</option></select><span class="campo-error" data-err="entidad"></span></label>
+        <label>Impuesto <select id="n-imp"><option value="">Primero elige la entidad</option></select><span class="campo-error" data-err="concepto_impuesto"></span></label>
+      </div>
+
+      <!-- Monto y vencimiento (Servicios, Proveedores e Impuestos) -->
+      <div class="cat-form" id="f-comun" hidden>
+        <label>Monto (S/) <input id="n-monto" inputmode="decimal" placeholder="0.00"><span class="campo-error" data-err="monto"></span></label>
+        <label>Fecha de vencimiento <input id="n-venc" type="date"><span class="campo-error" data-err="fecha_vencimiento"></span></label>
+      </div>
+
+      <!-- Préstamos -->
+      <div class="cat-form" id="f-Préstamos" hidden>
+        <label>Entidad bancaria (solo letras) <input id="n-ent-pre" maxlength="100" autocomplete="off"><span class="campo-error" data-err="entidad"></span></label>
+        <label>Monto total del préstamo (S/) <input id="n-monto-total" inputmode="decimal" placeholder="0.00"><span class="campo-error" data-err="monto_total"></span></label>
+        <div class="dos-col">
+          <label>Número de cuotas <input id="n-cuotas" inputmode="numeric" maxlength="2" placeholder="Ej. 12"><span class="campo-error" data-err="num_cuotas"></span></label>
+          <label>Mora (% anual) <input id="n-mora" inputmode="decimal" placeholder="Ej. 18.5"><span class="campo-error" data-err="mora_tna"></span></label>
+        </div>
+        <p class="aviso-chico">ℹ️ La mora es una tasa nominal anual (base 360 días). Por cada día de atraso de una cuota se suma al monto: cuota × mora ÷ 360.</p>
+        <label>Fecha en que vence el préstamo total <input id="n-venc-total" type="date"><span class="campo-error" data-err="fecha_vencimiento_total"></span></label>
+        <label>Día en que empieza a pagar la primera cuota <input id="n-primera" type="date"><span class="campo-error" data-err="fecha_primera_cuota"></span></label>
+        <p class="aviso-chico">Las demás cuotas se generan cada mes, el mismo día, desde la primera cuota.</p>
+      </div>
+
       <p class="error" id="nuevo-error"></p>
       <menu><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="nuevo-continuar">Continuar</button></menu>
     </div>
@@ -160,6 +197,7 @@
       <div id="nuevo-dup" class="aviso" hidden></div>
       <p class="confirma-t">Confirma los datos del pago:</p>
       <dl class="datos" id="nuevo-resumen"></dl>
+      <div id="nuevo-cuotas" hidden></div>
       <p class="error" id="nuevo-error2"></p>
       <menu><button class="btn btn-claro" id="nuevo-volver">Volver</button><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="nuevo-confirmar">Confirmar y registrar</button></menu>
     </div>
@@ -174,6 +212,9 @@
         <label>Fecha de pago <input type="date" id="pagar-fecha"><span class="campo-error" id="err-pagar-fecha"></span></label>
         <label>Hora de pago <input type="time" id="pagar-hora"><span class="campo-error" id="err-pagar-hora"></span></label>
       </div>
+      <label>Método de pago <select id="pagar-metodo"></select><span class="campo-error" id="err-pagar-metodo"></span></label>
+      <label id="pagar-sub-lab" hidden><span id="pagar-sub-t"></span> <select id="pagar-sub"></select><span class="campo-error" id="err-pagar-sub"></span></label>
+      <p class="aviso-chico" id="pagar-metodo-nota">Ningún método de pago tiene descuento: el monto a pagar es el mismo.</p>
       <label>Comentario (opcional) <textarea id="pagar-coment" maxlength="300" rows="2"></textarea></label>
       <label>Evidencia (JPG, PNG o PDF, máx. 5 MB) <input type="file" id="pagar-archivo" accept="image/jpeg,image/png,application/pdf"><span class="campo-error" id="err-pagar-archivo"></span></label>
       <menu><button class="btn btn-claro" data-cerrar>Cancelar</button><button class="btn btn-primario" id="pagar-continuar">Continuar</button></menu>

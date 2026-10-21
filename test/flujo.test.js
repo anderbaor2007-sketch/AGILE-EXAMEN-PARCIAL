@@ -13,6 +13,7 @@ const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Li
 const hora = () => new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
 const mas = (n) => { const d = new Date(hoy() + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const mesDe = (f) => f.slice(0, 7);
+const mesesMas = (f, n) => { const [y, m, d] = f.split('-').map(Number); const t = new Date(Date.UTC(y, m - 1 + n, 1)); const u = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate(); return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), Math.min(d, u))).toISOString().slice(0, 10); };
 
 async function pedir(cookie, metodo, url, body, headers = {}) {
   const esJson = body && !Buffer.isBuffer(body);
@@ -20,18 +21,28 @@ async function pedir(cookie, metodo, url, body, headers = {}) {
   const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = t; }
   return { status: r.status, json: j, cookie: (r.headers.get('set-cookie') || '').split(';')[0], headers: r.headers };
 }
-const nuevo = (o) => ({ concepto: 'Gas', entidad: 'Calidda', categoria_id: 1, monto: '50.5', fecha_vencimiento: mas(10), ...o });
-const crear = (o) => pedir(asistente, 'POST', '/api/pagos', nuevo(o));
+// Cuerpo base de un pago de Servicios (Luz). `concepto` es solo una etiqueta de prueba para ubicar el pago: se guarda en la BD tras crearlo.
+const BASE = {
+  1: { tipo_servicio: 'Luz', entidad: 'Hidrandina', numero_recibo: 'R-0001', codigo_suministro: '123456' },
+  2: { ruc: '20123456789', razon_social: 'Distribuidora Norte SAC' },
+  3: { entidad: 'SUNAT', concepto_impuesto: 'IGV' },
+};
+const nuevo = (o) => { const { concepto, ...r } = o; return { categoria_id: 1, ...BASE[r.categoria_id ?? 1], monto: '50.5', fecha_vencimiento: mas(10), ...r }; };
+const crear = async (o) => {
+  const r = await pedir(asistente, 'POST', '/api/pagos', nuevo(o));
+  if (r.status === 201 && o.concepto) await query('UPDATE pagos SET concepto = $2 WHERE id = $1', [r.json.id, o.concepto]);
+  return r;
+};
 const pagarCon = (id, archivo, extra = {}) => pedir(asistente, 'PUT', `/api/pagos/${id}/pagar`, archivo,
-  { 'X-Fecha-Pago': hoy(), 'X-Hora-Pago': '00:00', 'X-Nombre': 'boleta.png', ...extra });
+  { 'X-Fecha-Pago': hoy(), 'X-Hora-Pago': '00:00', 'X-Nombre': 'boleta.png', 'X-Metodo-Pago': 'EFECTIVO', ...extra });
 const cambiarCon = (id, archivo) => pedir(asistente, 'PUT', `/api/pagos/${id}/evidencia`, archivo, { 'X-Nombre': 'nueva.png' });
 const idPor = async (c) => (await query('SELECT id FROM pagos WHERE concepto = $1', [c]))[0].id;
 
 test.before(async () => {
   await iniciarEsquema();
-  await query('TRUNCATE evidencias, notificaciones, pagos, categorias, usuarios RESTART IDENTITY CASCADE');
+  await query('TRUNCATE evidencias, notificaciones, pagos, prestamos, categorias, usuarios RESTART IDENTITY CASCADE');
   await require('../src/seed').asegurarDatosIniciales();
-  await query('TRUNCATE evidencias, pagos RESTART IDENTITY CASCADE');             // los datos de prueba los creamos aquí
+  await query('TRUNCATE evidencias, pagos, prestamos RESTART IDENTITY CASCADE');             // los datos de prueba los creamos aquí
   await new Promise((ok) => server.listen(0, ok)); base = `http://127.0.0.1:${server.address().port}`;
   gerente = (await pedir(null, 'POST', '/api/login', { usuario: 'Gerente', clave: 'gerente123' })).cookie;
   asistente = (await pedir(null, 'POST', '/api/login', { usuario: 'Asistente', clave: 'asistente123' })).cookie;
@@ -58,42 +69,154 @@ test('HU-01 inicio de sesión', async () => {
   const sal = await pedir(gerente, 'POST', '/api/logout', {}); assert.match(sal.headers.get('set-cookie'), /Max-Age=0/);
 });
 
-test('HU-05 registrar pago por realizar (validaciones, límites, repetido)', async () => {
+test('HU-05 registrar pago por realizar (formulario por categoría, validaciones, límites, repetido)', async () => {
   assert.equal((await pedir(gerente, 'POST', '/api/pagos', nuevo({}))).status, 403);                    // solo asistente
   const vacio = await pedir(asistente, 'POST', '/api/pagos', {});
-  assert.equal(vacio.status, 400);
-  for (const k of ['concepto', 'entidad', 'categoria_id', 'monto', 'fecha_vencimiento']) assert.ok(vacio.json.campos[k], k);
+  assert.equal(vacio.status, 400); assert.ok(vacio.json.campos.categoria_id);                            // la categoría va primero
+  assert.ok((await pedir(asistente, 'POST', '/api/pagos', { categoria_id: 99 })).json.campos.categoria_id);
+  // ---- Servicios: Luz/Agua piden código de suministro; Internet no ----
+  const sv = await pedir(asistente, 'POST', '/api/pagos', { categoria_id: 1 });
+  for (const k of ['tipo_servicio', 'entidad', 'numero_recibo', 'monto', 'fecha_vencimiento']) assert.ok(sv.json.campos[k], k);
+  assert.ok((await crear({ codigo_suministro: '' })).json.campos.codigo_suministro);                      // Luz sin suministro
+  assert.ok((await crear({ tipo_servicio: 'Agua', codigo_suministro: '' })).json.campos.codigo_suministro);
+  assert.ok((await crear({ tipo_servicio: 'Gas' })).json.campos.tipo_servicio);
+  assert.ok((await crear({ numero_recibo: 'R 1!' })).json.campos.numero_recibo);
+  assert.ok((await crear({ codigo_suministro: 'ab cd' })).json.campos.codigo_suministro);
+  const net = await crear({ concepto: 'Internet de prueba', tipo_servicio: 'Internet', entidad: 'Movistar', codigo_suministro: undefined, numero_recibo: 'F001-778' });
+  assert.equal(net.status, 201);                                                                          // Internet: sin código de suministro
+  const [fn] = await query('SELECT tipo_servicio, numero_recibo, codigo_suministro FROM pagos WHERE id=$1', [net.json.id]);
+  assert.deepEqual({ ...fn }, { tipo_servicio: 'Internet', numero_recibo: 'F001-778', codigo_suministro: null });
+  const luz = await crear({ entidad: 'Hidrandina', numero_recibo: 'L-55', fecha_vencimiento: mas(8) }); assert.equal(luz.status, 201);
+  const [fl] = await query('SELECT concepto, entidad, tipo_servicio, codigo_suministro FROM pagos WHERE id=$1', [luz.json.id]);
+  assert.deepEqual({ ...fl }, { concepto: 'Luz', entidad: 'Hidrandina', tipo_servicio: 'Luz', codigo_suministro: '123456' });
+  // ---- Montos y límites ----
   for (const monto of ['0', '-5', '10.999', 'abc']) assert.ok((await crear({ monto })).json.campos.monto, monto);
-  assert.match((await crear({ categoria_id: 1, monto: '20000.01' })).json.campos.monto, /20,000/);       // Servicios máx. S/ 20 000
-  assert.equal((await crear({ concepto: 'Servicio tope', categoria_id: 1, monto: '20000', fecha_vencimiento: mas(11) })).status, 201);
-  assert.ok((await crear({ categoria_id: 2, monto: '500000.01' })).json.campos.monto);                  // otras: S/ 500 000
+  assert.match((await crear({ monto: '20000.01' })).json.campos.monto, /20,000/);                          // Servicios máx. S/ 20 000
+  assert.equal((await crear({ concepto: 'Servicio tope', monto: '20000', fecha_vencimiento: mas(11) })).status, 201);
+  assert.ok((await crear({ categoria_id: 2, monto: '500000.01' })).json.campos.monto);                    // otras: S/ 500 000
   assert.equal((await crear({ concepto: 'Proveedor tope', categoria_id: 2, monto: '500000', fecha_vencimiento: mas(12) })).status, 201);
-  assert.match((await crear({ fecha_vencimiento: mas(-1) })).json.campos.fecha_vencimiento, /anterior a hoy/);      // no puede ser pasada
+  // ---- Fechas ----
+  assert.match((await crear({ fecha_vencimiento: mas(-1) })).json.campos.fecha_vencimiento, /anterior a hoy/);
   const venceHoy = await crear({ concepto: 'Vence hoy registrado', entidad: 'Entidad Hoy', fecha_vencimiento: hoy() });
   assert.equal(venceHoy.status, 201);                                                                    // hoy sí: vence al terminar el día
   const vh = (await pedir(asistente, 'GET', '/api/pagos')).json.pagos.find((x) => x.concepto === 'Vence hoy registrado');
-  assert.equal(vh.dias, 0); assert.notEqual(vh.alerta, 'ATRASADO');                                      // hoy no está atrasado; lo estará desde las 00:00 de mañana
-  assert.ok((await crear({ fecha_vencimiento: mas(-3) })).json.campos.fecha_vencimiento);
+  assert.equal(vh.dias, 0); assert.notEqual(vh.alerta, 'ATRASADO');
   assert.ok((await crear({ fecha_vencimiento: '2026-02-31' })).json.campos.fecha_vencimiento);
-  // Entidad: solo letras
+  assert.match((await crear({ fecha_vencimiento: mas(367) })).json.campos.fecha_vencimiento, /1 año/);
+  const unAnio = new Date(hoy() + 'T00:00:00Z'); unAnio.setUTCFullYear(unAnio.getUTCFullYear() + 1);
+  assert.equal((await crear({ concepto: 'Un año justo', entidad: 'Banco', fecha_vencimiento: unAnio.toISOString().slice(0, 10) })).status, 201);
+  // ---- Entidad: solo letras ----
   for (const e of ['Banco 123', 'Movistar&Co', 'SAT-Trujillo', 'Ent.']) assert.match((await crear({ entidad: e })).json.campos.entidad, /solo puede contener letras/, e);
   assert.equal((await crear({ concepto: 'Con tildes', entidad: 'Compañía Ñandú Perú', fecha_vencimiento: mas(14) })).status, 201);
-  // Vencimiento: máximo 1 año desde el registro
-  const unAnio = new Date(hoy() + 'T00:00:00Z'); unAnio.setUTCFullYear(unAnio.getUTCFullYear() + 1);
-  assert.match((await crear({ fecha_vencimiento: mas(367) })).json.campos.fecha_vencimiento, /1 año/);
-  assert.equal((await crear({ concepto: 'Un año justo', entidad: 'Banco', fecha_vencimiento: unAnio.toISOString().slice(0, 10) })).status, 201);
-  // Registro correcto: queda Pendiente
-  const ok = await crear({ concepto: 'Luz', entidad: 'Hidrandina', fecha_vencimiento: mas(20) }); assert.equal(ok.status, 201);
+  // ---- Proveedores: RUC + razón social ----
+  const pv = await pedir(asistente, 'POST', '/api/pagos', { categoria_id: 2 });
+  for (const k of ['ruc', 'razon_social', 'monto', 'fecha_vencimiento']) assert.ok(pv.json.campos[k], k);
+  for (const ruc of ['2012345678', '201234567890', '2012345678A', '30123456789']) assert.ok((await crear({ categoria_id: 2, ruc })).json.campos.ruc, ruc);
+  assert.ok((await crear({ categoria_id: 2, razon_social: '###' })).json.campos.razon_social);
+  const prov = await crear({ categoria_id: 2, razon_social: 'Ferretería López & Hnos. S.A.C.', fecha_vencimiento: mas(9) }); assert.equal(prov.status, 201);
+  const [fp] = await query('SELECT concepto, entidad, ruc, razon_social FROM pagos WHERE id=$1', [prov.json.id]);
+  assert.deepEqual({ ...fp }, { concepto: 'Pago a proveedor', entidad: 'Ferretería López & Hnos. S.A.C.', ruc: '20123456789', razon_social: 'Ferretería López & Hnos. S.A.C.' });
+  // ---- Impuestos: SUNAT (IGV / renta) o SAT (predial / vehicular) ----
+  const im = await pedir(asistente, 'POST', '/api/pagos', { categoria_id: 3 });
+  for (const k of ['entidad', 'concepto_impuesto', 'monto', 'fecha_vencimiento']) assert.ok(im.json.campos[k], k);
+  assert.ok((await crear({ categoria_id: 3, entidad: 'MUNICIPALIDAD' })).json.campos.entidad);
+  assert.match((await crear({ categoria_id: 3, entidad: 'SUNAT', concepto_impuesto: 'Impuesto predial' })).json.campos.concepto_impuesto, /IGV o Impuesto a la renta/);
+  assert.match((await crear({ categoria_id: 3, entidad: 'SAT', concepto_impuesto: 'IGV' })).json.campos.concepto_impuesto, /predial o Impuesto vehicular/);
+  for (const [entidad, concepto_impuesto] of [['SUNAT', 'IGV'], ['SUNAT', 'Impuesto a la renta'], ['SAT', 'Impuesto predial'], ['SAT', 'Impuesto vehicular']]) {
+    const r = await crear({ categoria_id: 3, entidad, concepto_impuesto, fecha_vencimiento: mas(16) }); assert.equal(r.status, 201, concepto_impuesto);
+    const [x] = await query('SELECT concepto, entidad FROM pagos WHERE id=$1', [r.json.id]); assert.deepEqual({ ...x }, { concepto: concepto_impuesto, entidad });
+  }
+  // ---- Registro correcto: queda Pendiente ----
+  const ok = await crear({ concepto: 'Luz', entidad: 'Electronorte', fecha_vencimiento: mas(20) }); assert.equal(ok.status, 201);
   const [fila] = await query('SELECT estado, entidad FROM pagos WHERE id = $1', [ok.json.id]);
-  assert.equal(fila.estado, 'PENDIENTE'); assert.equal(fila.entidad, 'Hidrandina');
-  // Aviso de pago repetido: misma entidad + categoría + mismo mes
-  const v1 = await pedir(asistente, 'POST', '/api/pagos/verificar', nuevo({ concepto: 'Luz otra vez', entidad: ' hidrandina ', fecha_vencimiento: mas(21) }));
+  assert.equal(fila.estado, 'PENDIENTE'); assert.equal(fila.entidad, 'Electronorte');
+  // ---- Aviso de pago repetido: misma entidad + categoría + concepto + mismo mes ----
+  const v1 = await pedir(asistente, 'POST', '/api/pagos/verificar', nuevo({ entidad: ' electronorte ', fecha_vencimiento: mas(21) }));
   if (mesDe(mas(21)) === mesDe(mas(20))) { assert.equal(v1.json.duplicado.concepto, 'Luz'); } else { assert.equal(v1.json.duplicado, null); }
   const v2 = await pedir(asistente, 'POST', '/api/pagos/verificar', nuevo({ entidad: 'Otra entidad', fecha_vencimiento: mas(20) }));
   assert.equal(v2.status, 200); assert.equal(v2.json.duplicado, null);
-  const v3 = await pedir(asistente, 'POST', '/api/pagos/verificar', nuevo({ concepto: 'Luz', entidad: 'HIDRANDINA', fecha_vencimiento: mas(20) }));
-  assert.ok(v3.json.duplicado && v3.json.duplicado.entidad === 'Hidrandina');
-  assert.equal((await crear({ concepto: 'Luz', entidad: 'Hidrandina', fecha_vencimiento: mas(20) })).status, 201);   // el usuario puede confirmar igual
+  const v3 = await pedir(asistente, 'POST', '/api/pagos/verificar', nuevo({ entidad: 'ELECTRONORTE', fecha_vencimiento: mas(20) }));
+  assert.ok(v3.json.duplicado && v3.json.duplicado.entidad === 'Electronorte');
+  const v4 = await pedir(asistente, 'POST', '/api/pagos/verificar', nuevo({ tipo_servicio: 'Agua', entidad: 'Electronorte', fecha_vencimiento: mas(20) }));
+  assert.equal(v4.json.duplicado, null);                                                                  // otro servicio de la misma entidad no es repetido
+  assert.equal((await crear({ concepto: 'Luz', entidad: 'Electronorte', fecha_vencimiento: mas(20) })).status, 201);   // el usuario puede confirmar igual
+});
+
+test('Préstamos: cuotas mensuales, mora (TNA base 360 días) y método de pago permitido', async () => {
+  const pr = (o) => ({ categoria_id: 4, entidad: 'Banco de Crédito', monto_total: '1200', num_cuotas: '4', mora_tna: '36', fecha_vencimiento_total: mesesMas(mas(5), 3), fecha_primera_cuota: mas(5), ...o });
+  const vacio = await pedir(asistente, 'POST', '/api/pagos', { categoria_id: 4 });
+  for (const k of ['entidad', 'monto_total', 'num_cuotas', 'mora_tna', 'fecha_vencimiento_total', 'fecha_primera_cuota']) assert.ok(vacio.json.campos[k], k);
+  assert.ok((await pedir(asistente, 'POST', '/api/pagos', pr({ entidad: 'Banco 2' }))).json.campos.entidad);
+  assert.ok((await pedir(asistente, 'POST', '/api/pagos', pr({ monto_total: '500000.01' }))).json.campos.monto_total);
+  for (const n of ['0', '61', '1.5', 'x']) assert.ok((await pedir(asistente, 'POST', '/api/pagos', pr({ num_cuotas: n }))).json.campos.num_cuotas, n);
+  for (const m of ['-1', '101', 'abc', '10.123']) assert.ok((await pedir(asistente, 'POST', '/api/pagos', pr({ mora_tna: m }))).json.campos.mora_tna, m);
+  assert.ok((await pedir(asistente, 'POST', '/api/pagos', pr({ fecha_primera_cuota: mas(-1) }))).json.campos.fecha_primera_cuota);
+  assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ fecha_vencimiento_total: mas(1) }))).json.campos.fecha_vencimiento_total, /anterior a la fecha de la primera cuota/);
+  assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ fecha_vencimiento_total: mesesMas(mas(5), 2) }))).json.campos.fecha_vencimiento_total, /última cuota/);   // 4 cuotas no caben
+  assert.match((await pedir(asistente, 'POST', '/api/pagos', pr({ fecha_vencimiento_total: mesesMas(hoy(), 61) }))).json.campos.fecha_vencimiento_total, /5 años/);
+  // Previsualización: 4 cuotas mensuales el mismo día
+  const vista = await pedir(asistente, 'POST', '/api/pagos/verificar', pr({}));
+  assert.equal(vista.status, 200); assert.equal(vista.json.cuotas.length, 4);
+  assert.deepEqual(vista.json.cuotas.map((c) => c.fecha), [0, 1, 2, 3].map((i) => mesesMas(mas(5), i)));
+  assert.deepEqual(vista.json.cuotas.map((c) => c.monto), [300, 300, 300, 300]);
+  // Reparto con centavos: la última cuota absorbe la diferencia
+  const v3 = await pedir(asistente, 'POST', '/api/pagos/verificar', pr({ monto_total: '100', num_cuotas: '3', fecha_vencimiento_total: mesesMas(mas(5), 2) }));
+  assert.deepEqual(v3.json.cuotas.map((c) => c.monto), [33.33, 33.33, 33.34]);
+  // Crear: se generan los pagos (cada uno con su ID) y todos quedan Pendientes
+  const r = await pedir(asistente, 'POST', '/api/pagos', pr({})); assert.equal(r.status, 201); assert.equal(r.json.cuotas, 4);
+  const filas = await query("SELECT id, concepto, entidad, monto::float8 AS monto, fecha_vencimiento, estado, numero_cuota, total_cuotas, prestamo_id FROM pagos WHERE prestamo_id IS NOT NULL ORDER BY numero_cuota");
+  assert.equal(filas.length, 4); assert.ok(filas.every((f) => f.estado === 'PENDIENTE' && f.entidad === 'Banco de Crédito' && f.prestamo_id === filas[0].prestamo_id && f.total_cuotas === 4));
+  assert.deepEqual(filas.map((f) => f.concepto), ['Cuota 1 de 4', 'Cuota 2 de 4', 'Cuota 3 de 4', 'Cuota 4 de 4']);
+  assert.equal(new Set(filas.map((f) => f.id)).size, 4);
+  const [pre] = await query('SELECT monto_total::float8 AS t, num_cuotas, mora_tna::float8 AS m FROM prestamos'); assert.deepEqual({ ...pre }, { t: 1200, num_cuotas: 4, m: 36 });
+  // Repetido: mismo préstamo
+  assert.ok((await pedir(asistente, 'POST', '/api/pagos/verificar', pr({}))).json.duplicado);
+  // Mora: cuota 300 con TNA 36 % = 300 × 0,36 ÷ 360 = S/ 0,30 por día de atraso
+  await query("UPDATE pagos SET fecha_vencimiento = $2 WHERE id = $1", [filas[0].id, mas(-10)]);
+  const lista = (await pedir(asistente, 'GET', '/api/pagos')).json.pagos;
+  const atr = lista.find((x) => x.id === filas[0].id);
+  assert.equal(atr.alerta, 'ATRASADO'); assert.equal(atr.mora, 3); assert.equal(atr.total, 303); assert.equal(atr.monto, 300);
+  assert.deepEqual(atr.detalle, [['Cuota', '1 de 4']]);
+  const panel = (await pedir(gerente, 'GET', '/api/panel')).json;
+  assert.ok(panel.pendientes.some((x) => x.id === filas[0].id && x.mora === 3));
+  // Método de pago en préstamos: solo transferencia o tarjeta de crédito
+  for (const h of [{ 'X-Metodo-Pago': 'EFECTIVO' }, { 'X-Metodo-Pago': 'BILLETERA', 'X-Metodo-Detalle': 'YAPE' }, { 'X-Metodo-Pago': 'TARJETA', 'X-Metodo-Detalle': 'DEBITO' }]) {
+    const x = await pagarCon(filas[0].id, PNG, h); assert.equal(x.status, 400, JSON.stringify(h)); assert.match(x.json.error, /préstamos solo|Completa/);
+  }
+  const pagado = await pagarCon(filas[0].id, PNG, { 'X-Metodo-Pago': 'TARJETA', 'X-Metodo-Detalle': 'CREDITO' });
+  assert.equal(pagado.status, 200); assert.equal(pagado.json.mora, 3); assert.equal(pagado.json.total, 303); assert.equal(pagado.json.metodo_texto, 'Tarjeta de crédito');
+  const [pg] = await query('SELECT metodo_pago, metodo_detalle, mora_pagada::float8 AS mora FROM pagos WHERE id=$1', [filas[0].id]);
+  assert.deepEqual({ ...pg }, { metodo_pago: 'TARJETA', metodo_detalle: 'CREDITO', mora: 3 });
+  const despues = (await pedir(asistente, 'GET', '/api/pagos')).json.pagos.find((x) => x.id === filas[0].id);
+  assert.equal(despues.mora, 3); assert.equal(despues.total, 303);                                       // la mora queda fija al pagar
+  const t2 = await pagarCon(filas[1].id, PNG, { 'X-Metodo-Pago': 'TRANSFERENCIA' }); assert.equal(t2.status, 200);
+  // Sin mora (0 %) o sin atraso no se cobra mora
+  const sinMora = await pedir(asistente, 'POST', '/api/pagos', pr({ entidad: 'Banco Pichincha', mora_tna: '0', num_cuotas: '1', fecha_vencimiento_total: mas(5) })); assert.equal(sinMora.status, 201);
+  await query("UPDATE pagos SET fecha_vencimiento=$1 WHERE id=$2", [mas(-5), sinMora.json.id]);
+  assert.equal((await pedir(asistente, 'GET', '/api/pagos')).json.pagos.find((x) => x.id === sinMora.json.id).mora, 0);
+});
+
+test('Método de pago: se elige al registrar el pago y no hay descuentos', async () => {
+  const id = (await crear({ concepto: 'Método', fecha_vencimiento: mas(4) })).json.id;
+  const m = (h) => pagarCon(id, PNG, h);
+  assert.equal((await pagarCon(id, PNG, { 'X-Metodo-Pago': '' })).status, 400);                           // obligatorio
+  assert.ok((await pagarCon(id, PNG, { 'X-Metodo-Pago': '' })).json.campos.metodo_pago);
+  assert.equal((await m({ 'X-Metodo-Pago': 'CHEQUE' })).status, 400);
+  assert.ok((await m({ 'X-Metodo-Pago': 'BILLETERA' })).json.campos.metodo_detalle);                       // falta Plin/Yape/Agora
+  assert.ok((await m({ 'X-Metodo-Pago': 'BILLETERA', 'X-Metodo-Detalle': 'PAYPAL' })).json.campos.metodo_detalle);
+  assert.ok((await m({ 'X-Metodo-Pago': 'TARJETA' })).json.campos.metodo_detalle);                         // falta crédito/débito
+  assert.equal((await m({ 'X-Metodo-Pago': 'EFECTIVO', 'X-Metodo-Detalle': 'YAPE' })).status, 400);
+  assert.equal((await query('SELECT estado FROM pagos WHERE id=$1', [id]))[0].estado, 'PENDIENTE');        // los rechazos no cambian nada
+  const casos = [['TRANSFERENCIA', undefined, 'Transferencia'], ['EFECTIVO', undefined, 'Efectivo'], ['BILLETERA', 'PLIN', 'Billetera digital (Plin)'], ['BILLETERA', 'YAPE', 'Billetera digital (Yape)'],
+    ['BILLETERA', 'AGORA', 'Billetera digital (Agora)'], ['TARJETA', 'CREDITO', 'Tarjeta de crédito'], ['TARJETA', 'DEBITO', 'Tarjeta de débito']];
+  for (const [metodo, det, texto] of casos) {
+    const nid = (await crear({ concepto: 'M-' + texto, fecha_vencimiento: mas(4) })).json.id;
+    const r = await pagarCon(nid, PNG, { 'X-Metodo-Pago': metodo, ...(det ? { 'X-Metodo-Detalle': det } : {}) });
+    assert.equal(r.status, 200, texto); assert.equal(r.json.metodo_texto, texto); assert.equal(r.json.total, 50.5);   // sin descuento: mismo monto
+    const p = (await pedir(asistente, 'GET', '/api/pagos')).json.pagos.find((x) => x.id === nid); assert.equal(p.metodo_texto, texto); assert.equal(p.total, 50.5);
+  }
+  const pan = (await pedir(gerente, 'GET', '/api/panel')).json; assert.ok(pan.pagados.some((x) => x.metodo_texto === 'Billetera digital (Yape)'));
+  const ev = (await pedir(gerente, 'GET', `/api/pagos/${(await idPor('M-Efectivo'))}/evidencias`)).json; assert.equal(ev.pago.metodo_texto, 'Efectivo');
 });
 
 test('HU-06 registrar pago como realizado con evidencia', async () => {
@@ -172,7 +295,7 @@ test('HU-07 cambiar evidencia (máx. 3, intento previo) y HU-03 evidencias solo 
   assert.deepEqual(filas.filter((f) => !f.vigente).map((f) => Number(f.numero_intento)), [1, 2, 3]);
   // Comentario en el cambio de evidencia (por archivo) e identificador autogenerado
   const idc = (await crear({ concepto: 'Con comentario', fecha_vencimiento: mas(9) })).json.id; await pagarCon(idc, PNG, { 'X-Comentario': encodeURIComponent('primero') });
-  assert.equal((await pedir(asistente, 'PUT', `/api/pagos/${idc}/evidencia`, JPG, { 'X-Comentario': encodeURIComponent('corregido por error de foto') })).status, 200);
+  assert.equal((await pedir(asistente, 'PUT', `/api/pagos/${idc}/evidencia`, JPG, { 'X-Comentario': encodeURIComponent('corregido por error de foto')})).status, 200);
   const ic = (await pedir(gerente, 'GET', `/api/pagos/${idc}/evidencias`)).json;
   assert.equal(ic.vigente.comentario, 'corregido por error de foto'); assert.equal(ic.previos[0].comentario, 'primero');
   assert.match(ic.pago.codigo, /^PAG-\d{4}$/);
@@ -239,3 +362,4 @@ test('Sesión única por usuario (gerente y asistente pueden estar a la vez)', a
   assert.equal((await pedir(a2, 'GET', '/api/pagos')).status, 200);
   assert.equal((await pedir(g1, 'GET', '/api/panel')).status, 200);                         // la sesión del gerente no se toca
 });
+

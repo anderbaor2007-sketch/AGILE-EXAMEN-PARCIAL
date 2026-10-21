@@ -80,6 +80,32 @@ ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS sesion_id TEXT;   -- sesión vigen
 UPDATE usuarios SET correo = 'Gerente@castillo.pe' WHERE correo = 'gerente@castillo.pe';
 UPDATE usuarios SET correo = 'Asistente@castillo.pe' WHERE correo = 'asistente@castillo.pe';
 
+-- Préstamos: un préstamo genera una cuota (pago) por mes. La mora es una tasa nominal anual (base 360 días).
+CREATE TABLE IF NOT EXISTS prestamos (
+  id                      SERIAL PRIMARY KEY,
+  entidad                 TEXT NOT NULL,                  -- entidad bancaria
+  monto_total             NUMERIC(12,2) NOT NULL CHECK (monto_total > 0),
+  num_cuotas              INT NOT NULL CHECK (num_cuotas > 0),
+  mora_tna                NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (mora_tna >= 0),
+  fecha_vencimiento_total TEXT NOT NULL,                  -- fecha en que vence el préstamo completo
+  fecha_primera_cuota     TEXT NOT NULL,                  -- el día de esta fecha se repite cada mes
+  creado_en               TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Datos propios de cada categoría y método de pago (todos opcionales: los pagos antiguos siguen funcionando)
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS tipo_servicio     TEXT;     -- Servicios: Agua / Luz / Internet
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS numero_recibo     TEXT;     -- Servicios
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS codigo_suministro TEXT;     -- Servicios: Agua / Luz
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS ruc               TEXT;     -- Proveedores
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS razon_social      TEXT;     -- Proveedores
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS prestamo_id       INT REFERENCES prestamos(id) ON DELETE CASCADE;   -- Préstamos
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS numero_cuota      INT;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS total_cuotas      INT;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS metodo_pago       TEXT;     -- TRANSFERENCIA / EFECTIVO / BILLETERA / TARJETA (se elige al pagar)
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS metodo_detalle    TEXT;     -- PLIN / YAPE / AGORA / CREDITO / DEBITO
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS mora_pagada       NUMERIC(12,2) NOT NULL DEFAULT 0;   -- mora cobrada al pagar una cuota atrasada
+CREATE INDEX IF NOT EXISTS ix_pagos_prestamo ON pagos(prestamo_id);
+
 -- Avisos para el gerente (cambio de evidencia)
 CREATE TABLE IF NOT EXISTS notificaciones (
   id        SERIAL PRIMARY KEY,

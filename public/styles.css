@@ -204,3 +204,14 @@ textarea { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; bor
 
 td.cod { font-family: ui-monospace, Consolas, monospace; font-size: .8rem; font-weight: 700; color: var(--navy-2); white-space: nowrap; }
 .evid-com { color: var(--gris); font-size: .85rem; margin: -4px 0 8px; }
+
+
+/* Formulario por categoría y cuotas de préstamos */
+.cat-form[hidden] { display: none; }
+.cuotas-tabla { width: 100%; border-collapse: collapse; font-size: .85rem; margin: 6px 0 12px; }
+.cuotas-tabla th, .cuotas-tabla td { padding: 5px 10px; border-bottom: 1px solid #e3e8f2; text-align: left; }
+.cuotas-tabla th.der, .cuotas-tabla td.der { text-align: right; }
+.cuotas-scroll { max-height: 220px; overflow: auto; border: 1px solid #e3e8f2; border-radius: 10px; }
+.cuotas-scroll .cuotas-tabla { margin: 0; }
+.cuotas-scroll thead th { position: sticky; top: 0; background: #f6f8fc; }
+.mora { color: #b45309; font-size: .75rem; display: block; }

@@ -1,2 +1,2 @@
--- Vacía TODOS los pagos y evidencias (deja usuarios y categorías). Ejecutar en Neon > SQL Editor.
-TRUNCATE evidencias, pagos RESTART IDENTITY CASCADE;
+-- Vacía TODOS los pagos, préstamos y evidencias (deja usuarios y categorías). Ejecutar en Neon > SQL Editor.
+TRUNCATE evidencias, pagos, prestamos RESTART IDENTITY CASCADE;
