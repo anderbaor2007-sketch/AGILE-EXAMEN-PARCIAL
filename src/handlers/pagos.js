@@ -45,6 +45,12 @@ const sumaMeses = (f, n) => {       // mismo día cada mes (si el mes es más co
   return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), Math.min(d, ult))).toISOString().slice(0, 10);
 };
 const diasEntre = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
+// Mensajes específicos para negativos y decimales (valen para recibo, ticket y código de suministro)
+function negDec(v, nombre) {
+  if (/^\s*-/.test(v)) return `${nombre} no puede ser negativo`;
+  if (/[.,]/.test(v)) return `${nombre} no puede tener decimales`;
+  return null;
+}
 const err = (status, error, campos) => ({ status, json: campos ? { error, campos } : { error } });
 const redondeo = (n) => Math.round(n * 100) / 100;
 
@@ -65,7 +71,7 @@ const calcMora = (monto, tna, diasAtraso) => (tna > 0 && diasAtraso > 0 ? redond
 function detalleDe(p) {
   const d = [];
   if (p.tipo_servicio) d.push(['Servicio', p.tipo_servicio]);
-  if (p.numero_recibo) d.push(['N.º de recibo', p.numero_recibo]);
+  if (p.numero_recibo) d.push([p.categoria === 'Impuestos' ? 'N.º de ticket' : 'N.º de recibo', p.numero_recibo]);
   if (p.codigo_suministro) d.push(['Código de suministro', p.codigo_suministro]);
   if (p.ruc) d.push(['RUC', p.ruc]);
   if (p.razon_social) d.push(['Razón social', p.razon_social]);
@@ -212,10 +218,12 @@ async function validarNuevo(body) {
     fila.entidad = validarEntidad(body, campos);
     const rec = t('numero_recibo');
     if (!rec) campos.numero_recibo = 'Ingresa el número de recibo';
+    else if (negDec(rec, 'El número de recibo')) campos.numero_recibo = negDec(rec, 'El número de recibo');
     else if (rec.length > 30 || !SOLO_ALFANUM.test(rec)) campos.numero_recibo = 'El número de recibo solo puede tener letras, números y guiones';
     if (tipo === 'Luz' || tipo === 'Agua') {
       const cod = t('codigo_suministro');
       if (!cod) campos.codigo_suministro = 'Ingresa el código de suministro';
+      else if (negDec(cod, 'El código de suministro')) campos.codigo_suministro = negDec(cod, 'El código de suministro');
       else if (!/^[0-9]{1,12}$/.test(cod)) campos.codigo_suministro = 'El código de suministro solo puede tener números';
       else fila.codigo_suministro = cod;
     }
@@ -240,10 +248,11 @@ async function validarNuevo(body) {
     const imp = t('concepto_impuesto');
     if (!imp) campos.concepto_impuesto = 'Selecciona el impuesto';
     else if (IMPUESTOS[ent] && !IMPUESTOS[ent].includes(imp)) campos.concepto_impuesto = `Con ${ent} solo se puede pagar: ${IMPUESTOS[ent].join(' o ')}`;
-    const recI = t('numero_recibo');
-    if (!recI) campos.numero_recibo = 'Ingresa el número de recibo';
-    else if (recI.length > 30 || !SOLO_ALFANUM.test(recI)) campos.numero_recibo = 'El número de recibo solo puede tener letras, números y guiones';
-    Object.assign(fila, { concepto: imp, entidad: ent, numero_recibo: recI });
+    const tick = t('numero_ticket');
+    if (!tick) campos.numero_ticket = 'Ingresa el número de ticket';
+    else if (negDec(tick, 'El número de ticket')) campos.numero_ticket = negDec(tick, 'El número de ticket');
+    else if (!/^[0-9]{1,12}$/.test(tick)) campos.numero_ticket = 'El número de ticket solo puede tener números';
+    Object.assign(fila, { concepto: imp, entidad: ent, numero_recibo: tick });   // se guarda en la misma columna que el recibo
     monto = validarMonto(body.monto, cat, 'monto', campos); vencimiento = t('fecha_vencimiento'); validarVencimiento(vencimiento, 'fecha_vencimiento', campos, atrasado);
 
   } else {   // Préstamos

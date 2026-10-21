@@ -416,7 +416,8 @@ function pistaCuotas() {
 }
 $('n-primera').addEventListener('input', pistaCuotas); $('n-venc-total').addEventListener('input', pistaCuotas);
 $('n-cuotas').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, ''); });
-['n-recibo', 'n-recibo-imp'].forEach((i) => $(i).addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^A-Za-z0-9-]/g, ''); }));
+$('n-recibo').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^A-Za-z0-9-]/g, ''); });
+$('n-recibo-imp').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 12); });   // ticket: solo dígitos (sin signo ni decimales)
 $('n-suministro').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^0-9]/g, '').slice(0, 12); });
 
 // «Pago atrasado»: la fecha debe ser anterior a hoy (hasta 1 año atrás); si no, debe ser hoy o posterior (hasta 1 año)
@@ -441,7 +442,7 @@ function leerNuevo() {
   if (c && c !== 'Préstamos') b.atrasado = $('n-atrasado').checked;
   if (c === 'Servicios') Object.assign(b, { tipo_servicio: $('n-tipo').value, entidad: $('n-ent-serv').value, numero_recibo: $('n-recibo').value, ...(['Luz', 'Agua'].includes($('n-tipo').value) ? { codigo_suministro: $('n-suministro').value } : {}), monto: $('n-monto').value, fecha_vencimiento: $('n-venc').value });
   else if (c === 'Proveedores') Object.assign(b, { ruc: $('n-ruc').value, razon_social: $('n-razon').value, monto: $('n-monto').value, fecha_vencimiento: $('n-venc').value });
-  else if (c === 'Impuestos') Object.assign(b, { entidad: $('n-ent-imp').value, concepto_impuesto: $('n-imp').value, numero_recibo: $('n-recibo-imp').value, monto: $('n-monto').value, fecha_vencimiento: $('n-venc').value });
+  else if (c === 'Impuestos') Object.assign(b, { entidad: $('n-ent-imp').value, concepto_impuesto: $('n-imp').value, numero_ticket: $('n-recibo-imp').value, monto: $('n-monto').value, fecha_vencimiento: $('n-venc').value });
   else if (c === 'Préstamos') Object.assign(b, { entidad: $('n-ent-pre').value, monto_total: $('n-monto-total').value, num_cuotas: $('n-cuotas').value, mora_tna: $('n-mora').value, fecha_vencimiento_total: $('n-venc-total').value, fecha_primera_cuota: $('n-primera').value });
   return b;
 }
@@ -450,7 +451,7 @@ function resumenNuevo0(d, cat) {
   const t = (k) => esc((d[k] ?? '').toString().trim());
   if (cat === 'Servicios') return [['Categoría', cat], ['Servicio', t('tipo_servicio')], ['Entidad', t('entidad')], ['N.º de recibo', t('numero_recibo')], ...(d.codigo_suministro ? [['Código de suministro', t('codigo_suministro')]] : []), ['Monto', soles(d.monto)], ['Vencimiento', fmtFecha(d.fecha_vencimiento)]];
   if (cat === 'Proveedores') return [['Categoría', cat], ['RUC', t('ruc')], ['Razón social', t('razon_social')], ['Monto', soles(d.monto)], ['Vencimiento', fmtFecha(d.fecha_vencimiento)]];
-  if (cat === 'Impuestos') return [['Categoría', cat], ['Entidad', t('entidad')], ['Impuesto', t('concepto_impuesto')], ['N.º de recibo', t('numero_recibo')], ['Monto', soles(d.monto)], ['Vencimiento', fmtFecha(d.fecha_vencimiento)]];
+  if (cat === 'Impuestos') return [['Categoría', cat], ['Entidad', t('entidad')], ['Impuesto', t('concepto_impuesto')], ['N.º de ticket', t('numero_ticket')], ['Monto', soles(d.monto)], ['Vencimiento', fmtFecha(d.fecha_vencimiento)]];
   return [['Categoría', cat], ['Entidad bancaria', t('entidad')], ['Monto total', soles(d.monto_total)], ['Número de cuotas', t('num_cuotas')], ['Mora (TNA, base 360 días)', `${Number(d.mora_tna)} %`], ['Vence el préstamo', fmtFecha(d.fecha_vencimiento_total)], ['Primera cuota', fmtFecha(d.fecha_primera_cuota)]];
 }
 $('nuevo-continuar').onclick = async () => {
